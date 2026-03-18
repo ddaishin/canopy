@@ -48,6 +48,7 @@ const RUST_COMMANDS: Record<string, string[]> = {
   install_skill: ["id", "sourceUrl", "format"],
   uninstall_skill: ["id", "format"],
   check_skills_installed: ["skillIds"],
+  fetch_marketplace_skills: ["repo"],
 
   // settings.rs
   save_keyring_secret: ["key", "value"],

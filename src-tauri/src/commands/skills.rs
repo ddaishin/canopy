@@ -1,6 +1,6 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[derive(Debug, Serialize)]
@@ -140,6 +140,93 @@ pub fn get_skills(project_path: Option<String>) -> Result<Vec<Skill>, String> {
     Ok(skills)
 }
 
+/// Entry from the GitHub Contents API response
+#[derive(Debug, Deserialize)]
+struct GitHubContentEntry {
+    name: String,
+    #[serde(rename = "type")]
+    entry_type: String, // "file" or "dir"
+    download_url: Option<String>,
+    path: String,
+}
+
+/// Download a single file from a URL to a local path
+fn download_file(url: &str, dest: &Path) -> Result<(), String> {
+    let output = Command::new("curl")
+        .args(["-s", "--fail", "--max-redirs", "0", "-L", url])
+        .output()
+        .map_err(|e| format!("Failed to run curl: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!("Download failed for {}", url));
+    }
+
+    fs::write(dest, &output.stdout)
+        .map_err(|e| format!("Failed to write {}: {}", dest.display(), e))
+}
+
+/// Recursively download a GitHub directory using the Contents API
+fn download_github_directory(api_url: &str, target_dir: &Path) -> Result<(), String> {
+    fs::create_dir_all(target_dir)
+        .map_err(|e| format!("Failed to create directory: {}", e))?;
+
+    // Fetch directory listing from GitHub Contents API
+    let output = Command::new("curl")
+        .args([
+            "-s", "--fail",
+            "-H", "Accept: application/vnd.github.v3+json",
+            "-H", "User-Agent: Canopy",
+            api_url,
+        ])
+        .output()
+        .map_err(|e| format!("Failed to fetch directory listing: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!("GitHub API request failed for {}", api_url));
+    }
+
+    let entries: Vec<GitHubContentEntry> = serde_json::from_slice(&output.stdout)
+        .map_err(|e| format!("Failed to parse GitHub API response: {}", e))?;
+
+    for entry in entries {
+        match entry.entry_type.as_str() {
+            "file" => {
+                if let Some(ref dl_url) = entry.download_url {
+                    let dest = target_dir.join(&entry.name);
+                    download_file(dl_url, &dest)?;
+                }
+            }
+            "dir" => {
+                let sub_api = format!(
+                    "https://api.github.com/repos/{}/contents/{}",
+                    // Extract owner/repo from the API URL
+                    extract_repo_from_api_url(api_url).unwrap_or_default(),
+                    entry.path,
+                );
+                let sub_dir = target_dir.join(&entry.name);
+                download_github_directory(&sub_api, &sub_dir)?;
+            }
+            _ => {} // skip symlinks etc.
+        }
+    }
+
+    Ok(())
+}
+
+/// Extract "owner/repo" from a GitHub API URL like
+/// "https://api.github.com/repos/anthropics/skills/contents/skills/pdf"
+fn extract_repo_from_api_url(url: &str) -> Option<String> {
+    let prefix = "https://api.github.com/repos/";
+    let rest = url.strip_prefix(prefix)?;
+    // rest = "anthropics/skills/contents/skills/pdf"
+    let parts: Vec<&str> = rest.splitn(3, '/').collect();
+    if parts.len() >= 2 {
+        Some(format!("{}/{}", parts[0], parts[1]))
+    } else {
+        None
+    }
+}
+
 #[tauri::command]
 pub fn install_skill(id: String, source_url: String, format: String) -> InstallResult {
     // Validate skill id — prevent path traversal
@@ -177,64 +264,80 @@ pub fn install_skill(id: String, source_url: String, format: String) -> InstallR
         }
     };
 
-    let (target_dir, target_file) = if format == "command" {
-        let dir = home.join(".claude").join("commands");
-        let file = dir.join(format!("{}.md", id));
-        (dir, file)
-    } else {
-        let dir = home.join(".claude").join("skills").join(&id);
-        let file = dir.join("SKILL.md");
-        (dir, file)
-    };
+    if format == "command" {
+        // Single file download for commands
+        let target_dir = home.join(".claude").join("commands");
+        let target_file = target_dir.join(format!("{}.md", id));
 
-    // Create directory if needed
-    if let Err(e) = fs::create_dir_all(&target_dir) {
-        return InstallResult {
-            success: false,
-            id,
-            installed_path: None,
-            error: Some(format!("Failed to create directory: {}", e)),
-        };
-    }
-
-    // Download via curl (no redirects — raw.githubusercontent.com serves directly)
-    let output = Command::new("curl")
-        .args(["-s", "--fail", "--max-redirs", "0", &source_url])
-        .output();
-
-    match output {
-        Ok(result) => {
-            if !result.status.success() {
-                let stderr = String::from_utf8_lossy(&result.stderr);
-                return InstallResult {
-                    success: false,
-                    id,
-                    installed_path: None,
-                    error: Some(format!("Download failed: {}", stderr)),
-                };
-            }
-
-            match fs::write(&target_file, &result.stdout) {
-                Ok(_) => InstallResult {
-                    success: true,
-                    id,
-                    installed_path: Some(target_file.to_string_lossy().to_string()),
-                    error: None,
-                },
-                Err(e) => InstallResult {
-                    success: false,
-                    id,
-                    installed_path: None,
-                    error: Some(format!("Failed to write file: {}", e)),
-                },
-            }
+        if let Err(e) = fs::create_dir_all(&target_dir) {
+            return InstallResult {
+                success: false,
+                id,
+                installed_path: None,
+                error: Some(format!("Failed to create directory: {}", e)),
+            };
         }
-        Err(e) => InstallResult {
-            success: false,
-            id,
-            installed_path: None,
-            error: Some(format!("Failed to run curl: {}", e)),
-        },
+
+        match download_file(&source_url, &target_file) {
+            Ok(_) => InstallResult {
+                success: true,
+                id,
+                installed_path: Some(target_file.to_string_lossy().to_string()),
+                error: None,
+            },
+            Err(e) => InstallResult {
+                success: false,
+                id,
+                installed_path: None,
+                error: Some(e),
+            },
+        }
+    } else {
+        // Full directory download for skills
+        // Derive GitHub API URL from the raw.githubusercontent.com source URL
+        // source_url: https://raw.githubusercontent.com/anthropics/skills/main/skills/pdf/SKILL.md
+        // api_url:    https://api.github.com/repos/anthropics/skills/contents/skills/pdf
+        let api_url = source_url
+            .replace("https://raw.githubusercontent.com/", "https://api.github.com/repos/")
+            .replace("/main/", "/contents/")
+            .replace("/master/", "/contents/")
+            .trim_end_matches("/SKILL.md")
+            .to_string();
+
+        let target_dir = home.join(".claude").join("skills").join(&id);
+
+        // Remove existing skill directory if present (clean reinstall)
+        if target_dir.exists() {
+            let _ = fs::remove_dir_all(&target_dir);
+        }
+
+        match download_github_directory(&api_url, &target_dir) {
+            Ok(_) => {
+                // Verify SKILL.md was downloaded
+                let skill_file = target_dir.join("SKILL.md");
+                if skill_file.exists() {
+                    InstallResult {
+                        success: true,
+                        id,
+                        installed_path: Some(target_dir.to_string_lossy().to_string()),
+                        error: None,
+                    }
+                } else {
+                    InstallResult {
+                        success: false,
+                        id,
+                        installed_path: None,
+                        error: Some("SKILL.md not found in downloaded directory".to_string()),
+                    }
+                }
+            }
+            Err(e) => InstallResult {
+                success: false,
+                id,
+                installed_path: None,
+                error: Some(e),
+            },
+        }
     }
 }
 
@@ -319,6 +422,109 @@ pub fn check_skills_installed(skill_ids: Vec<(String, String)>) -> Vec<Installed
             }
         })
         .collect()
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketplaceSkill {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub source_url: String,
+    pub repo_url: String,
+}
+
+/// Fetch available skills from a GitHub repository's skills/ directory.
+/// Uses the GitHub Contents API to list skill directories and reads SKILL.md metadata.
+#[tauri::command]
+pub fn fetch_marketplace_skills(repo: Option<String>) -> Result<Vec<MarketplaceSkill>, String> {
+    let repo = repo.unwrap_or_else(|| "anthropics/skills".to_string());
+
+    // Validate repo format (owner/repo)
+    if !repo.contains('/') || repo.matches('/').count() != 1 {
+        return Err("Invalid repo format. Expected 'owner/repo'.".to_string());
+    }
+
+    let api_url = format!(
+        "https://api.github.com/repos/{}/contents/skills",
+        repo
+    );
+
+    let output = Command::new("curl")
+        .args([
+            "-s", "--fail",
+            "-H", "Accept: application/vnd.github.v3+json",
+            "-H", "User-Agent: Canopy",
+            &api_url,
+        ])
+        .output()
+        .map_err(|e| format!("Failed to fetch marketplace: {}", e))?;
+
+    if !output.status.success() {
+        return Err("Failed to fetch skills directory from GitHub".to_string());
+    }
+
+    let entries: Vec<GitHubContentEntry> = serde_json::from_slice(&output.stdout)
+        .map_err(|e| format!("Failed to parse GitHub response: {}", e))?;
+
+    let mut skills: Vec<MarketplaceSkill> = Vec::new();
+
+    for entry in entries {
+        if entry.entry_type != "dir" {
+            continue;
+        }
+
+        let skill_id = entry.name.clone();
+
+        // Fetch SKILL.md to get metadata
+        let skill_url = format!(
+            "https://raw.githubusercontent.com/{}/main/skills/{}/SKILL.md",
+            repo, skill_id
+        );
+
+        let md_output = Command::new("curl")
+            .args(["-s", "--fail", &skill_url])
+            .output();
+
+        let (name, description) = match md_output {
+            Ok(ref result) if result.status.success() => {
+                let content = String::from_utf8_lossy(&result.stdout);
+                let content = skip_yaml_frontmatter(&content);
+                let mut lines = content.lines();
+                let title = lines
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .trim_start_matches('#')
+                    .trim()
+                    .to_string();
+                lines.next(); // skip blank line
+                let desc = lines.next().unwrap_or("").trim().to_string();
+                (
+                    if title.is_empty() { skill_id.clone() } else { title },
+                    desc,
+                )
+            }
+            _ => (skill_id.clone(), String::new()),
+        };
+
+        skills.push(MarketplaceSkill {
+            id: skill_id.clone(),
+            name,
+            description,
+            source_url: format!(
+                "https://raw.githubusercontent.com/{}/main/skills/{}/SKILL.md",
+                repo, skill_id
+            ),
+            repo_url: format!(
+                "https://github.com/{}/tree/main/skills/{}",
+                repo, skill_id
+            ),
+        });
+    }
+
+    skills.sort_by(|a, b| a.id.to_lowercase().cmp(&b.id.to_lowercase()));
+    Ok(skills)
 }
 
 #[cfg(test)]

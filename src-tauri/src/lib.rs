@@ -31,6 +31,7 @@ pub fn run() {
             commands::skills::install_skill,
             commands::skills::uninstall_skill,
             commands::skills::check_skills_installed,
+            commands::skills::fetch_marketplace_skills,
             commands::github::get_github_items,
             commands::settings::save_keyring_secret,
             commands::settings::get_keyring_secret,
