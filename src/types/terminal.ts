@@ -1,3 +1,5 @@
+import type { TabStatus } from "./tab-status";
+
 export interface TerminalTab {
   id: string;
   terminalId: string | null; // null until spawned
@@ -10,9 +12,8 @@ export interface TerminalTab {
   initialPrompt?: string; // Sent to Claude after spawn (e.g. "/skill-name")
   isWorkspaceAgent?: boolean; // Special workspace-wide Claude session
   workspaceContext?: string; // Full context string for workspace agent
-  dead?: boolean; // Process has exited
-  completedWhileHidden?: boolean; // Exited while user was on another tab
-  needsAttention?: boolean; // Bell received while user was on another tab
+  status: TabStatus;
+  exitCode?: number | null;
 }
 
 export type TerminalEvent =

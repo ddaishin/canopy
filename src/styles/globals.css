@@ -2833,33 +2833,44 @@ html, body, #root {
   color: var(--danger);
 }
 
-/* ── Tab Completion Indicator ── */
-.tab-completion-dot {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent-orange);
+/* ── Tab Status Indicators ── */
+.tab-status-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   margin-left: 4px;
-  animation: pulse-dot 2s ease-in-out infinite;
+  font-size: 8px;
+  line-height: 1;
   vertical-align: middle;
 }
 
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+.tab-status-indicator.status-starting {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  opacity: 0.5;
 }
 
-/* ── Tab Attention Indicator (bell/permission prompt) ── */
-.tab-attention-dot {
-  display: inline-block;
+.tab-status-indicator.status-running {
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--text-muted);
+  border-top-color: var(--accent-orange);
+  border-radius: 50%;
+  animation: tab-spinner 0.8s linear infinite;
+}
+
+@keyframes tab-spinner {
+  to { transform: rotate(360deg); }
+}
+
+.tab-status-indicator.status-waiting {
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: #FFB86C;
-  margin-left: 4px;
   animation: pulse-attention 1s ease-in-out infinite;
-  vertical-align: middle;
 }
 
 @keyframes pulse-attention {
@@ -2867,8 +2878,14 @@ html, body, #root {
   50% { opacity: 0.5; transform: scale(1.3); }
 }
 
-.terminal-tab.dead .tab-attention-dot {
-  display: none;
+.tab-status-indicator.status-done-success {
+  color: #50FA7B;
+  font-size: 9px;
+}
+
+.tab-status-indicator.status-done-error {
+  color: #FF5555;
+  font-size: 9px;
 }
 
 /* ── Toast Notifications ── */

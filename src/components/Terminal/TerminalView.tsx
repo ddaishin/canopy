@@ -5,6 +5,8 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { SearchAddon } from "@xterm/addon-search";
 import { open } from "@tauri-apps/plugin-shell";
 import type { TerminalTab } from "../../types/terminal";
+import type { TabStatus } from "../../types/tab-status";
+import { isDoneStatus, IDLE_THRESHOLD_MS } from "../../types/tab-status";
 import { invoke } from "@tauri-apps/api/core";
 import {
   spawnTerminal,
@@ -42,8 +44,7 @@ interface TerminalViewProps {
   splitMode: boolean;
   onTerminalSpawned: (tabId: string, terminalId: string) => void;
   claudeCliAvailable?: boolean;
-  onTabDied?: (exitCode: number | null) => void;
-  onBell?: () => void;
+  onStatusChange?: (status: TabStatus, exitCode?: number | null) => void;
   onRelaunch?: () => void;
   isDragging?: boolean;
   onTerminalHover?: (terminalId: string | null) => void;
@@ -56,8 +57,7 @@ export function TerminalView({
   splitMode,
   onTerminalSpawned,
   claudeCliAvailable,
-  onTabDied,
-  onBell,
+  onStatusChange,
   onRelaunch,
   isDragging,
   onTerminalHover,
@@ -70,6 +70,8 @@ export function TerminalView({
   const spawnedRef = useRef(false);
   const terminalIdRef = useRef<string | null>(null);
   const roRef = useRef<ResizeObserver | null>(null);
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const currentStatusRef = useRef<TabStatus>(tab.status);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [_fontSize, setFontSize] = useState(13);
@@ -78,21 +80,24 @@ export function TerminalView({
   // Keep latest callbacks in refs to avoid stale closures
   const onTerminalSpawnedRef = useRef(onTerminalSpawned);
   onTerminalSpawnedRef.current = onTerminalSpawned;
-  const onTabDiedRef = useRef(onTabDied);
-  onTabDiedRef.current = onTabDied;
-  const onBellRef = useRef(onBell);
-  onBellRef.current = onBell;
+  const onStatusChangeRef = useRef(onStatusChange);
+  onStatusChangeRef.current = onStatusChange;
   const onRegisterElementRef = useRef(onRegisterElement);
   onRegisterElementRef.current = onRegisterElement;
   const onRelaunchRef = useRef(onRelaunch);
   onRelaunchRef.current = onRelaunch;
 
+  const emitStatus = useCallback((status: TabStatus, exitCode?: number | null) => {
+    currentStatusRef.current = status;
+    onStatusChangeRef.current?.(status, exitCode);
+  }, []);
+
   // Init terminal on first visibility — no cleanup (xterm persists)
   useEffect(() => {
     if (!containerRef.current || spawnedRef.current || !isVisible) return;
 
-    // If tab was restored from a previous session (dead on load), don't spawn a PTY
-    if (tab.dead) {
+    // If tab was restored from a previous session (done on load), don't spawn a PTY
+    if (isDoneStatus(tab.status)) {
       spawnedRef.current = true;
       const container = containerRef.current;
       const xterm = new Terminal({
@@ -156,7 +161,7 @@ export function TerminalView({
       xterm.write("Install it with:\r\n");
       xterm.write("  \x1b[33mnpm install -g @anthropic-ai/claude-code\x1b[0m\r\n\r\n");
       xterm.write("Then close this tab and try again.\r\n");
-      onTabDiedRef.current?.(null);
+      emitStatus("done-error");
       return;
     }
 
@@ -186,7 +191,9 @@ export function TerminalView({
         if (outputBuffer.includes(pattern)) {
           lastAttentionTime = now;
           outputBuffer = ""; // Reset to avoid repeat triggers
-          onBellRef.current?.();
+          // Clear idle timer — waiting is more specific
+          if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+          emitStatus("waiting");
           return;
         }
       }
@@ -222,12 +229,23 @@ export function TerminalView({
           if (event.type === "output") {
             const bytes = new Uint8Array(event.data);
             xterm.write(bytes);
+
+            // Transition to running + reset idle timer
+            emitStatus("running");
+            if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+            idleTimerRef.current = setTimeout(() => {
+              emitStatus("idle");
+            }, IDLE_THRESHOLD_MS);
+
             // Strip ANSI escape sequences and check for attention patterns
             const text = new TextDecoder().decode(bytes).replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
             checkForAttentionNeeded(text);
           } else if (event.type === "exit") {
+            // Clear idle timer
+            if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
             xterm.write("\r\n\x1b[90m[Process exited]\x1b[0m\r\n");
-            onTabDiedRef.current?.(event.code);
+            const status: TabStatus = (event.code === 0 || event.code === null) ? "done-success" : "done-error";
+            emitStatus(status, event.code);
           }
         },
         initialCmd,
@@ -242,10 +260,15 @@ export function TerminalView({
         writeToTerminal(termId, data).catch(console.error);
         // User responded — clear the buffer so we don't re-trigger on the same prompt
         outputBuffer = "";
+        // If we were waiting, transition back to running
+        if (currentStatusRef.current === "waiting") {
+          emitStatus("running");
+        }
       });
 
       xterm.onBell(() => {
-        onBellRef.current?.();
+        if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+        emitStatus("waiting");
       });
 
       const ro = new ResizeObserver(() => {
@@ -271,6 +294,7 @@ export function TerminalView({
   // Cleanup on UNMOUNT only
   useEffect(() => {
     return () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
       roRef.current?.disconnect();
       xtermRef.current?.dispose();
       if (terminalIdRef.current) {

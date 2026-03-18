@@ -1,3 +1,6 @@
+import type { TabStatus } from "../../types/tab-status";
+import { isDoneStatus } from "../../types/tab-status";
+
 interface TerminalTabProps {
   tabId?: string;
   label: string;
@@ -7,14 +10,31 @@ interface TerminalTabProps {
   isWorkspaceAgent?: boolean;
   isHomePage?: boolean;
   isProjectOverview?: boolean;
-  isDead?: boolean;
+  status?: TabStatus;
   isDragOver?: boolean;
-  completedWhileHidden?: boolean;
-  needsAttention?: boolean;
   onClick: () => void;
   onClose: () => void;
   onDragStart?: (tabId: string) => void;
   onDragEnter?: (tabId: string) => void;
+}
+
+function StatusIndicator({ status }: { status?: TabStatus }) {
+  if (!status || status === "idle") return null;
+
+  switch (status) {
+    case "starting":
+      return <span className="tab-status-indicator status-starting" />;
+    case "running":
+      return <span className="tab-status-indicator status-running" />;
+    case "waiting":
+      return <span className="tab-status-indicator status-waiting" />;
+    case "done-success":
+      return <span className="tab-status-indicator status-done-success">{"\u2713"}</span>;
+    case "done-error":
+      return <span className="tab-status-indicator status-done-error">x</span>;
+    default:
+      return null;
+  }
 }
 
 export function TerminalTab({
@@ -26,10 +46,8 @@ export function TerminalTab({
   isWorkspaceAgent,
   isHomePage,
   isProjectOverview,
-  isDead,
+  status,
   isDragOver,
-  completedWhileHidden,
-  needsAttention,
   onClick,
   onClose,
   onDragStart,
@@ -37,12 +55,13 @@ export function TerminalTab({
 }: TerminalTabProps) {
   const typeClass = isHomePage ? "home" : isProjectOverview ? "overview" : isClaudeSession ? "claude" : "shell";
   const icon = isHomePage ? "\u2302" : isProjectOverview ? "\u2261" : isWorkspaceAgent ? "*" : isClaudeSession ? ">" : "$";
+  const isDead = status ? isDoneStatus(status) : false;
 
   const canDrag = !isHomePage && !!tabId && !!onDragStart;
 
   return (
     <div
-      className={`terminal-tab ${isActive ? "active" : ""} ${typeClass} ${isWorkspaceAgent ? "agent" : ""} ${isDead ? "dead" : ""} ${isDragOver ? "drag-over" : ""}`}
+      className={`terminal-tab ${isActive ? "active" : ""} ${typeClass} ${isWorkspaceAgent ? "agent" : ""} ${isDead ? "dead" : ""} ${isDragOver ? "drag-over" : ""} ${status ? `status-${status}` : ""}`}
       onClick={onClick}
       onMouseDown={(e) => {
         // Only start drag on left click, not on close button
@@ -60,8 +79,7 @@ export function TerminalTab({
     >
       <span className="terminal-tab-icon">
         {icon}
-        {needsAttention && <span className="tab-attention-dot" />}
-        {completedWhileHidden && !needsAttention && <span className="tab-completion-dot" />}
+        <StatusIndicator status={status} />
       </span>
       <span className="terminal-tab-label">{label}</span>
       {!isHomePage && (
