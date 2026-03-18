@@ -1,5 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import type { TerminalTab } from "../types/terminal";
+import type { TabStatus } from "../types/tab-status";
+import { isDoneStatus } from "../types/tab-status";
 import { closeTerminal } from "../services/terminal-service";
 
 export const HOME_TAB_ID = "home";
@@ -32,7 +34,7 @@ function loadSavedSessions(): { tabs: TerminalTab[]; activeTabId: string } {
       projectName: s.projectName,
       isWorkspaceAgent: s.isWorkspaceAgent,
       sessionId: s.sessionId,
-      dead: !s.isProjectOverview, // PTY is gone after restart
+      status: s.isProjectOverview ? "starting" : "done-success" as TabStatus,
     }));
     return { tabs, activeTabId: saved.activeTabId || HOME_TAB_ID };
   } catch {
@@ -97,6 +99,7 @@ export function useTerminal() {
           projectPath,
           projectName,
           initialPrompt,
+          status: "starting",
         };
         return [...prev, newTab];
       });
@@ -127,6 +130,7 @@ export function useTerminal() {
           isProjectOverview: true,
           projectPath,
           projectName,
+          status: "idle",
         };
         setActiveTabId(id);
         return [...prev, newTab];
@@ -152,6 +156,7 @@ export function useTerminal() {
           projectName: "Workspace",
           isWorkspaceAgent: true,
           workspaceContext: context,
+          status: "starting",
         };
 
         setActiveTabId(id);
@@ -205,29 +210,23 @@ export function useTerminal() {
     );
   }, []);
 
-  const markTabDead = useCallback((tabId: string, isActiveTab: boolean) => {
+  const setTabStatus = useCallback((tabId: string, status: TabStatus, exitCode?: number | null) => {
     setTabs((prev) =>
-      prev.map((t) =>
-        t.id === tabId
-          ? { ...t, dead: true, completedWhileHidden: !isActiveTab }
-          : t
-      )
+      prev.map((t) => {
+        if (t.id !== tabId || t.status === status) return t;
+        return { ...t, status, ...(exitCode !== undefined ? { exitCode } : {}) };
+      })
     );
   }, []);
 
-  const clearTabNotice = useCallback((tabId: string) => {
+  const acknowledgeTab = useCallback((tabId: string) => {
     setTabs((prev) =>
-      prev.map((t) =>
-        t.id === tabId ? { ...t, completedWhileHidden: false, needsAttention: false } : t
-      )
-    );
-  }, []);
-
-  const markTabAttention = useCallback((tabId: string) => {
-    setTabs((prev) =>
-      prev.map((t) =>
-        t.id === tabId ? { ...t, needsAttention: true } : t
-      )
+      prev.map((t) => {
+        if (t.id !== tabId) return t;
+        // If waiting, transition back to idle (user is now looking at it)
+        if (t.status === "waiting") return { ...t, status: "idle" as TabStatus };
+        return t;
+      })
     );
   }, []);
 
@@ -261,15 +260,15 @@ export function useTerminal() {
   );
 
   const closeAllDeadTabs = useCallback(async () => {
-    const deadTabs = tabsRef.current.filter((t) => t.dead);
+    const deadTabs = tabsRef.current.filter((t) => isDoneStatus(t.status));
     for (const tab of deadTabs) {
       if (tab.terminalId) {
         closeTerminal(tab.terminalId).catch(() => {});
       }
     }
-    setTabs((prev) => prev.filter((t) => !t.dead));
+    setTabs((prev) => prev.filter((t) => !isDoneStatus(t.status)));
     setActiveTabId((current) => {
-      const remaining = tabsRef.current.filter((t) => !t.dead);
+      const remaining = tabsRef.current.filter((t) => !isDoneStatus(t.status));
       if (current && remaining.some((t) => t.id === current)) return current;
       return HOME_TAB_ID;
     });
@@ -287,9 +286,8 @@ export function useTerminal() {
     toggleSplit,
     removeTab,
     setTerminalId,
-    markTabDead,
-    clearTabNotice,
-    markTabAttention,
+    setTabStatus,
+    acknowledgeTab,
     reorderTabs,
     relaunchTab,
     closeAllDeadTabs,

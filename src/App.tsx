@@ -16,6 +16,8 @@ import { useNotificationSettings } from "./hooks/useNotificationSettings";
 import { ToastContainer } from "./components/Toast/ToastContainer";
 import { sendSessionNotification, sendAttentionNotification, ensureNotificationPermission } from "./services/notification-service";
 import type { Project } from "./types/project";
+import type { TabStatus } from "./types/tab-status";
+import { isDoneStatus, isTerminalAlive } from "./types/tab-status";
 
 function App() {
   const {
@@ -40,9 +42,8 @@ function App() {
     toggleSplit,
     removeTab,
     setTerminalId,
-    markTabDead,
-    clearTabNotice,
-    markTabAttention,
+    setTabStatus,
+    acknowledgeTab,
     reorderTabs,
     relaunchTab,
     closeAllDeadTabs,
@@ -142,55 +143,51 @@ function App() {
     };
   }, [findTerminalAtPoint]);
 
-  const handleTabDied = useCallback(
-    (tabId: string, tabLabel: string, isClaudeSession: boolean, exitCode: number | null) => {
-      const isActive = activeTabIdRef.current === tabId;
-      markTabDead(tabId, isActive);
+  // Unified status change handler
+  const handleStatusChange = useCallback(
+    (tabId: string, tabLabel: string, isClaudeSession: boolean, status: TabStatus, exitCode?: number | null) => {
+      setTabStatus(tabId, status, exitCode);
 
-      if (notifSettingsRef.current.systemNotifications && isClaudeSession && !document.hasFocus()) {
-        sendSessionNotification(tabLabel, exitCode).catch(console.error);
+      const isActive = activeTabIdRef.current === tabId;
+
+      if (isDoneStatus(status)) {
+        if (notifSettingsRef.current.systemNotifications && isClaudeSession && !document.hasFocus()) {
+          sendSessionNotification(tabLabel, exitCode ?? null).catch(console.error);
+        }
+      }
+
+      if (status === "waiting") {
+        if (isActive && document.hasFocus()) return; // User is already looking at it
+
+        // Bounce dock icon
+        getCurrentWindow().requestUserAttention(UserAttentionType.Informational).catch(console.error);
+
+        // Update dock badge with count of tabs needing attention
+        const attentionCount = tabs.filter((t) => t.status === "waiting").length + 1;
+        getCurrentWindow().setBadgeCount(attentionCount).catch(console.error);
+
+        if (notifSettingsRef.current.toastNotifications) {
+          addToast(
+            "Needs your input",
+            `"${tabLabel}" is waiting for a response`,
+            "success"
+          );
+        }
+
+        if (notifSettingsRef.current.systemNotifications && isClaudeSession && !document.hasFocus()) {
+          sendAttentionNotification(tabLabel).catch(console.error);
+        }
       }
     },
-    [markTabDead]
-  );
-
-  // Handle terminal bell (Claude asking a question / permission prompt)
-  const handleBell = useCallback(
-    (tabId: string, tabLabel: string, isClaudeSession: boolean) => {
-      const isActive = activeTabIdRef.current === tabId;
-      if (isActive && document.hasFocus()) return; // User is already looking at it
-
-      // Mark tab as needing attention
-      markTabAttention(tabId);
-
-      // Bounce dock icon
-      getCurrentWindow().requestUserAttention(UserAttentionType.Informational).catch(console.error);
-
-      // Update dock badge with count of tabs needing attention
-      const attentionCount = tabs.filter((t) => t.needsAttention).length + 1;
-      getCurrentWindow().setBadgeCount(attentionCount).catch(console.error);
-
-      if (notifSettingsRef.current.toastNotifications) {
-        addToast(
-          "Needs your input",
-          `"${tabLabel}" is waiting for a response`,
-          "success"
-        );
-      }
-
-      if (notifSettingsRef.current.systemNotifications && isClaudeSession && !document.hasFocus()) {
-        sendAttentionNotification(tabLabel).catch(console.error);
-      }
-    },
-    [markTabAttention, addToast, tabs]
+    [setTabStatus, addToast, tabs]
   );
 
   const selectTab = useCallback(
     (tabId: string) => {
       setActiveTabId(tabId);
-      clearTabNotice(tabId);
-      // Update dock badge: count remaining attention tabs (excluding the one being selected)
-      const remaining = tabs.filter((t) => t.needsAttention && t.id !== tabId).length;
+      acknowledgeTab(tabId);
+      // Update dock badge: count remaining waiting tabs (excluding the one being selected)
+      const remaining = tabs.filter((t) => t.status === "waiting" && t.id !== tabId).length;
       if (remaining === 0) {
         getCurrentWindow().setBadgeCount(undefined).catch(console.error);
         getCurrentWindow().requestUserAttention(null).catch(console.error);
@@ -198,7 +195,7 @@ function App() {
         getCurrentWindow().setBadgeCount(remaining).catch(console.error);
       }
     },
-    [setActiveTabId, clearTabNotice, tabs]
+    [setActiveTabId, acknowledgeTab, tabs]
   );
 
   // Keyboard shortcuts
@@ -244,7 +241,7 @@ function App() {
         e.preventDefault();
         if (activeTabId && activeTabId !== HOME_TAB_ID) {
           const tab = tabs.find((t) => t.id === activeTabId);
-          if (tab && !tab.dead && tab.isClaudeSession && !tab.isProjectOverview) {
+          if (tab && isTerminalAlive(tab.status) && tab.isClaudeSession && !tab.isProjectOverview) {
             if (!window.confirm("This Claude session is still running. Close it?")) {
               return;
             }
@@ -449,7 +446,7 @@ function App() {
             onNewTerminal={handleNewTerminal}
             onNewClaudeSession={handleNewClaude}
             onReorderTabs={reorderTabs}
-            hasDeadTabs={tabs.some((t) => t.dead)}
+            hasDeadTabs={tabs.some((t) => isDoneStatus(t.status))}
             onCloseAllDead={closeAllDeadTabs}
           />
 
@@ -531,8 +528,7 @@ function App() {
                       splitMode={splitMode}
                       onTerminalSpawned={setTerminalId}
                       claudeCliAvailable={claudeCliAvailable ?? true}
-                      onTabDied={(exitCode) => handleTabDied(tab.id, tab.label, tab.isClaudeSession, exitCode ?? null)}
-                      onBell={() => handleBell(tab.id, tab.label, tab.isClaudeSession)}
+                      onStatusChange={(status, exitCode) => handleStatusChange(tab.id, tab.label, tab.isClaudeSession, status, exitCode)}
                       onRelaunch={() => relaunchTab(tab.id)}
                       isDragging={isDragging && isTabVisible}
                       onTerminalHover={handleTerminalHover}
@@ -547,8 +543,7 @@ function App() {
                     splitMode={splitMode}
                     onTerminalSpawned={setTerminalId}
                     claudeCliAvailable={claudeCliAvailable ?? true}
-                    onTabDied={(exitCode) => handleTabDied(tab.id, tab.label, tab.isClaudeSession, exitCode ?? null)}
-                    onBell={() => handleBell(tab.id, tab.label, tab.isClaudeSession)}
+                    onStatusChange={(status, exitCode) => handleStatusChange(tab.id, tab.label, tab.isClaudeSession, status, exitCode)}
                     onRelaunch={() => relaunchTab(tab.id)}
                     isDragging={isDragging && isTabVisible}
                     onTerminalHover={handleTerminalHover}

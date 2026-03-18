@@ -43,6 +43,7 @@ describe("useTerminal", () => {
     expect(tab.isClaudeSession).toBe(true);
     expect(tab.terminalId).toBeNull();
     expect(tab.projectName).toBe("myproject");
+    expect(tab.status).toBe("starting");
   });
 
   it("addTab adds numeric suffix for duplicates", () => {
@@ -141,7 +142,7 @@ describe("useTerminal", () => {
     expect(result.current.tabs).toHaveLength(tabsBefore);
   });
 
-  it("markTabDead sets dead flag on correct tab", () => {
+  it("setTabStatus updates status on correct tab", () => {
     const { result } = renderHook(() => useTerminal());
 
     let tabId: string = "";
@@ -150,32 +151,78 @@ describe("useTerminal", () => {
     });
 
     act(() => {
-      result.current.markTabDead(tabId, false);
+      result.current.setTabStatus(tabId, "running");
     });
+    expect(result.current.tabs[0].status).toBe("running");
 
-    expect(result.current.tabs[0].dead).toBe(true);
-    expect(result.current.tabs[0].completedWhileHidden).toBe(true);
+    act(() => {
+      result.current.setTabStatus(tabId, "done-success", 0);
+    });
+    expect(result.current.tabs[0].status).toBe("done-success");
+    expect(result.current.tabs[0].exitCode).toBe(0);
   });
 
-  it("clearTabNotice resets completedWhileHidden flag", () => {
+  it("setTabStatus no-ops when status is unchanged", () => {
     const { result } = renderHook(() => useTerminal());
 
-    let tabId: string = "";
     act(() => {
-      tabId = result.current.addTab("/home/user/proj", true);
+      result.current.addTab("/home/user/proj", true);
     });
 
     act(() => {
-      result.current.markTabDead(tabId, false);
+      result.current.setTabStatus("uuid-1", "starting"); // already starting
     });
+    // Status should remain starting
+    expect(result.current.tabs[0].status).toBe("starting");
+  });
 
-    expect(result.current.tabs[0].completedWhileHidden).toBe(true);
+  it("setTabStatus done-error stores exit code", () => {
+    const { result } = renderHook(() => useTerminal());
 
     act(() => {
-      result.current.clearTabNotice(tabId);
+      result.current.addTab("/home/user/proj", true);
     });
 
-    expect(result.current.tabs[0].completedWhileHidden).toBe(false);
+    act(() => {
+      result.current.setTabStatus("uuid-1", "done-error", 1);
+    });
+    expect(result.current.tabs[0].status).toBe("done-error");
+    expect(result.current.tabs[0].exitCode).toBe(1);
+  });
+
+  it("acknowledgeTab transitions waiting to idle", () => {
+    const { result } = renderHook(() => useTerminal());
+
+    act(() => {
+      result.current.addTab("/home/user/proj", true);
+    });
+
+    act(() => {
+      result.current.setTabStatus("uuid-1", "waiting");
+    });
+    expect(result.current.tabs[0].status).toBe("waiting");
+
+    act(() => {
+      result.current.acknowledgeTab("uuid-1");
+    });
+    expect(result.current.tabs[0].status).toBe("idle");
+  });
+
+  it("acknowledgeTab does not change done status", () => {
+    const { result } = renderHook(() => useTerminal());
+
+    act(() => {
+      result.current.addTab("/home/user/proj", true);
+    });
+
+    act(() => {
+      result.current.setTabStatus("uuid-1", "done-success");
+    });
+
+    act(() => {
+      result.current.acknowledgeTab("uuid-1");
+    });
+    expect(result.current.tabs[0].status).toBe("done-success");
   });
 
   it("setTerminalId links terminal to tab", () => {
@@ -205,6 +252,7 @@ describe("useTerminal", () => {
     expect(tab.isProjectOverview).toBe(true);
     expect(tab.projectPath).toBe("/home/user/proj");
     expect(tab.label).toBe("proj");
+    expect(tab.status).toBe("idle"); // overview tabs never spawn PTY
   });
 
   it("openProjectTab reuses existing overview", () => {
@@ -265,6 +313,7 @@ describe("useTerminal", () => {
     expect(tab.isWorkspaceAgent).toBe(true);
     expect(tab.isClaudeSession).toBe(true);
     expect(tab.workspaceContext).toBe("context here");
+    expect(tab.status).toBe("starting");
   });
 
   // --- Session persistence ---
@@ -307,7 +356,7 @@ describe("useTerminal", () => {
 
     expect(result.current.tabs).toHaveLength(1);
     expect(result.current.tabs[0].id).toBe("saved-1");
-    expect(result.current.tabs[0].dead).toBe(true); // PTY is gone after restart
+    expect(result.current.tabs[0].status).toBe("done-success"); // PTY gone after restart
     expect(result.current.tabs[0].terminalId).toBeNull();
     expect(result.current.activeTabId).toBe("saved-1");
   });
@@ -369,7 +418,7 @@ describe("useTerminal", () => {
 
   // --- Close all dead tabs ---
 
-  it("closeAllDeadTabs removes only dead tabs", async () => {
+  it("closeAllDeadTabs removes only done tabs", async () => {
     const { result } = renderHook(() => useTerminal());
 
     act(() => {
@@ -379,9 +428,9 @@ describe("useTerminal", () => {
       result.current.addTab("/home/user/dead", true);
     });
 
-    // Mark second tab as dead
+    // Mark second tab as done
     act(() => {
-      result.current.markTabDead("uuid-2", false);
+      result.current.setTabStatus("uuid-2", "done-success");
     });
 
     expect(result.current.tabs).toHaveLength(2);
@@ -394,37 +443,31 @@ describe("useTerminal", () => {
     expect(result.current.tabs[0].projectName).toBe("alive");
   });
 
-  // --- markTabAttention ---
+  // --- Status transitions ---
 
-  it("markTabAttention sets needsAttention flag", () => {
+  it("status transitions: starting → running → idle → waiting → running → done", () => {
     const { result } = renderHook(() => useTerminal());
 
     act(() => {
       result.current.addTab("/home/user/proj", true);
     });
+    expect(result.current.tabs[0].status).toBe("starting");
 
-    act(() => {
-      result.current.markTabAttention("uuid-1");
-    });
+    act(() => result.current.setTabStatus("uuid-1", "running"));
+    expect(result.current.tabs[0].status).toBe("running");
 
-    expect(result.current.tabs[0].needsAttention).toBe(true);
-  });
+    act(() => result.current.setTabStatus("uuid-1", "idle"));
+    expect(result.current.tabs[0].status).toBe("idle");
 
-  it("clearTabNotice clears needsAttention flag", () => {
-    const { result } = renderHook(() => useTerminal());
+    act(() => result.current.setTabStatus("uuid-1", "waiting"));
+    expect(result.current.tabs[0].status).toBe("waiting");
 
-    act(() => {
-      result.current.addTab("/home/user/proj", true);
-    });
-    act(() => {
-      result.current.markTabAttention("uuid-1");
-    });
-    expect(result.current.tabs[0].needsAttention).toBe(true);
+    act(() => result.current.setTabStatus("uuid-1", "running"));
+    expect(result.current.tabs[0].status).toBe("running");
 
-    act(() => {
-      result.current.clearTabNotice("uuid-1");
-    });
-    expect(result.current.tabs[0].needsAttention).toBe(false);
+    act(() => result.current.setTabStatus("uuid-1", "done-success", 0));
+    expect(result.current.tabs[0].status).toBe("done-success");
+    expect(result.current.tabs[0].exitCode).toBe(0);
   });
 
   // --- relaunchTab ---
@@ -436,7 +479,7 @@ describe("useTerminal", () => {
       result.current.addTab("/home/user/proj", true, "session-123");
     });
     act(() => {
-      result.current.markTabDead("uuid-1", true);
+      result.current.setTabStatus("uuid-1", "done-success");
     });
 
     act(() => {
@@ -446,7 +489,7 @@ describe("useTerminal", () => {
     // Old tab should be gone, new tab should exist
     expect(result.current.tabs).toHaveLength(1);
     expect(result.current.tabs[0].id).not.toBe("uuid-1");
-    expect(result.current.tabs[0].dead).toBeUndefined();
+    expect(result.current.tabs[0].status).toBe("starting");
     expect(result.current.tabs[0].projectPath).toBe("/home/user/proj");
     // Should resume the same session
     expect(result.current.tabs[0].sessionId).toBe("session-123");
