@@ -304,6 +304,10 @@ pub fn check_skills_installed(skill_ids: Vec<(String, String)>) -> Vec<Installed
     skill_ids
         .iter()
         .map(|(id, format)| {
+            // Validate skill id — prevent path traversal
+            if id.is_empty() || id.contains('/') || id.contains('\\') || id.contains("..") {
+                return InstalledSkillStatus { id: id.clone(), installed: false };
+            }
             let exists = if format == "command" {
                 home.join(".claude").join("commands").join(format!("{}.md", id)).exists()
             } else {

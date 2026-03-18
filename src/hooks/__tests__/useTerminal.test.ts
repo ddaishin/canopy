@@ -266,4 +266,218 @@ describe("useTerminal", () => {
     expect(tab.isClaudeSession).toBe(true);
     expect(tab.workspaceContext).toBe("context here");
   });
+
+  // --- Session persistence ---
+
+  it("persists tabs to localStorage on change", () => {
+    const { result } = renderHook(() => useTerminal());
+
+    act(() => {
+      result.current.addTab("/home/user/proj", true);
+    });
+
+    const stored = localStorage.getItem("canopy-tab-sessions");
+    expect(stored).not.toBeNull();
+    const parsed = JSON.parse(stored!);
+    expect(parsed.tabs).toHaveLength(1);
+    expect(parsed.tabs[0].projectPath).toBe("/home/user/proj");
+    expect(parsed.activeTabId).toBe("uuid-1");
+  });
+
+  it("restores tabs from localStorage on mount", () => {
+    // Pre-populate localStorage with a saved session
+    localStorage.setItem(
+      "canopy-tab-sessions",
+      JSON.stringify({
+        tabs: [
+          {
+            id: "saved-1",
+            label: "myproject",
+            isClaudeSession: true,
+            projectPath: "/home/user/myproject",
+            projectName: "myproject",
+            sessionId: "session-abc",
+          },
+        ],
+        activeTabId: "saved-1",
+      })
+    );
+
+    const { result } = renderHook(() => useTerminal());
+
+    expect(result.current.tabs).toHaveLength(1);
+    expect(result.current.tabs[0].id).toBe("saved-1");
+    expect(result.current.tabs[0].dead).toBe(true); // PTY is gone after restart
+    expect(result.current.tabs[0].terminalId).toBeNull();
+    expect(result.current.activeTabId).toBe("saved-1");
+  });
+
+  it("does not persist credentials or sensitive data in localStorage", () => {
+    const { result } = renderHook(() => useTerminal());
+
+    // Add a tab with a workspace context (could contain sensitive info)
+    act(() => {
+      result.current.addWorkspaceAgentTab("/workspace", "some workspace context");
+    });
+
+    const stored = localStorage.getItem("canopy-tab-sessions");
+    expect(stored).not.toBeNull();
+
+    // workspaceContext should NOT be persisted
+    expect(stored).not.toContain("some workspace context");
+    expect(stored).not.toContain("workspaceContext");
+
+    // Ensure no secret-like fields leak
+    const lowerStored = stored!.toLowerCase();
+    expect(lowerStored).not.toContain("secret");
+    expect(lowerStored).not.toContain("password");
+    expect(lowerStored).not.toContain("access_key");
+    expect(lowerStored).not.toContain("token");
+  });
+
+  it("handles corrupted localStorage gracefully", () => {
+    localStorage.setItem("canopy-tab-sessions", "{{invalid json");
+
+    const { result } = renderHook(() => useTerminal());
+
+    expect(result.current.tabs).toEqual([]);
+    expect(result.current.activeTabId).toBe(HOME_TAB_ID);
+  });
+
+  // --- Tab reorder ---
+
+  it("reorderTabs swaps tab positions", () => {
+    const { result } = renderHook(() => useTerminal());
+
+    act(() => {
+      result.current.addTab("/home/user/a", true);
+    });
+    act(() => {
+      result.current.addTab("/home/user/b", false);
+    });
+
+    expect(result.current.tabs[0].projectName).toBe("a");
+    expect(result.current.tabs[1].projectName).toBe("b");
+
+    act(() => {
+      result.current.reorderTabs("uuid-2", "uuid-1");
+    });
+
+    expect(result.current.tabs[0].projectName).toBe("b");
+    expect(result.current.tabs[1].projectName).toBe("a");
+  });
+
+  // --- Close all dead tabs ---
+
+  it("closeAllDeadTabs removes only dead tabs", async () => {
+    const { result } = renderHook(() => useTerminal());
+
+    act(() => {
+      result.current.addTab("/home/user/alive", true);
+    });
+    act(() => {
+      result.current.addTab("/home/user/dead", true);
+    });
+
+    // Mark second tab as dead
+    act(() => {
+      result.current.markTabDead("uuid-2", false);
+    });
+
+    expect(result.current.tabs).toHaveLength(2);
+
+    await act(async () => {
+      await result.current.closeAllDeadTabs();
+    });
+
+    expect(result.current.tabs).toHaveLength(1);
+    expect(result.current.tabs[0].projectName).toBe("alive");
+  });
+
+  // --- markTabAttention ---
+
+  it("markTabAttention sets needsAttention flag", () => {
+    const { result } = renderHook(() => useTerminal());
+
+    act(() => {
+      result.current.addTab("/home/user/proj", true);
+    });
+
+    act(() => {
+      result.current.markTabAttention("uuid-1");
+    });
+
+    expect(result.current.tabs[0].needsAttention).toBe(true);
+  });
+
+  it("clearTabNotice clears needsAttention flag", () => {
+    const { result } = renderHook(() => useTerminal());
+
+    act(() => {
+      result.current.addTab("/home/user/proj", true);
+    });
+    act(() => {
+      result.current.markTabAttention("uuid-1");
+    });
+    expect(result.current.tabs[0].needsAttention).toBe(true);
+
+    act(() => {
+      result.current.clearTabNotice("uuid-1");
+    });
+    expect(result.current.tabs[0].needsAttention).toBe(false);
+  });
+
+  // --- relaunchTab ---
+
+  it("relaunchTab creates a new tab and removes the dead one", () => {
+    const { result } = renderHook(() => useTerminal());
+
+    act(() => {
+      result.current.addTab("/home/user/proj", true, "session-123");
+    });
+    act(() => {
+      result.current.markTabDead("uuid-1", true);
+    });
+
+    act(() => {
+      result.current.relaunchTab("uuid-1");
+    });
+
+    // Old tab should be gone, new tab should exist
+    expect(result.current.tabs).toHaveLength(1);
+    expect(result.current.tabs[0].id).not.toBe("uuid-1");
+    expect(result.current.tabs[0].dead).toBeUndefined();
+    expect(result.current.tabs[0].projectPath).toBe("/home/user/proj");
+    // Should resume the same session
+    expect(result.current.tabs[0].sessionId).toBe("session-123");
+  });
+
+  // --- removeTab picks adjacent tab ---
+
+  it("removeTab switches to adjacent tab instead of always going home", async () => {
+    const { result } = renderHook(() => useTerminal());
+
+    act(() => {
+      result.current.addTab("/home/user/a", true); // uuid-1
+    });
+    act(() => {
+      result.current.addTab("/home/user/b", true); // uuid-2
+    });
+    act(() => {
+      result.current.addTab("/home/user/c", true); // uuid-3
+    });
+
+    // Active tab is uuid-3 (last added). Switch to uuid-2.
+    act(() => {
+      result.current.setActiveTabId("uuid-2");
+    });
+
+    // Remove uuid-2 — should switch to uuid-3 (next neighbor), not HOME
+    await act(async () => {
+      await result.current.removeTab("uuid-2");
+    });
+
+    expect(result.current.activeTabId).not.toBe(HOME_TAB_ID);
+    expect(result.current.tabs).toHaveLength(2);
+  });
 });

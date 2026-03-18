@@ -1,11 +1,24 @@
 use crate::state::{AppState, Provider, ProviderSettings};
-use std::collections::HashMap;
 use tauri::State;
 
 const KEYRING_SERVICE: &str = "canopy";
 
+const ALLOWED_KEYRING_KEYS: &[&str] = &[
+    "aws_access_key_id",
+    "aws_secret_access_key",
+    "aws_session_token",
+];
+
+fn validate_keyring_key(key: &str) -> Result<(), String> {
+    if !ALLOWED_KEYRING_KEYS.contains(&key) {
+        return Err(format!("Invalid keyring key: {}", key));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn save_keyring_secret(key: String, value: String) -> Result<(), String> {
+    validate_keyring_key(&key)?;
     let entry = keyring::Entry::new(KEYRING_SERVICE, &key)
         .map_err(|e| format!("Keyring error: {}", e))?;
     entry
@@ -16,6 +29,7 @@ pub fn save_keyring_secret(key: String, value: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn get_keyring_secret(key: String) -> Result<Option<String>, String> {
+    validate_keyring_key(&key)?;
     let entry = keyring::Entry::new(KEYRING_SERVICE, &key)
         .map_err(|e| format!("Keyring error: {}", e))?;
     match entry.get_password() {
@@ -27,6 +41,7 @@ pub fn get_keyring_secret(key: String) -> Result<Option<String>, String> {
 
 #[tauri::command]
 pub fn delete_keyring_secret(key: String) -> Result<(), String> {
+    validate_keyring_key(&key)?;
     let entry = keyring::Entry::new(KEYRING_SERVICE, &key)
         .map_err(|e| format!("Keyring error: {}", e))?;
     match entry.delete_credential() {
@@ -78,56 +93,37 @@ pub fn update_provider_cache(
     Ok(())
 }
 
-#[allow(dead_code)]
-#[tauri::command]
-pub fn get_provider_env_vars(state: State<'_, AppState>) -> Result<HashMap<String, String>, String> {
-    let cache = state
-        .provider_settings
-        .lock()
-        .map_err(|e| format!("Lock poisoned: {}", e))?;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let Some(settings) = cache.as_ref() else {
-        return Ok(HashMap::new());
-    };
-
-    let mut env = HashMap::new();
-
-    match settings.provider {
-        Provider::Direct => {}
-        Provider::Bedrock => {
-            env.insert("CLAUDE_CODE_USE_BEDROCK".to_string(), "1".to_string());
-            if let Some(ref r) = settings.aws_region {
-                env.insert("AWS_REGION".to_string(), r.clone());
-            }
-            if let Some(ref p) = settings.aws_profile {
-                env.insert("AWS_PROFILE".to_string(), p.clone());
-            }
-            if let Some(ref k) = settings.aws_access_key_id {
-                env.insert("AWS_ACCESS_KEY_ID".to_string(), k.clone());
-            }
-            if let Some(ref s) = settings.aws_secret_access_key {
-                env.insert("AWS_SECRET_ACCESS_KEY".to_string(), s.clone());
-            }
-            if let Some(ref t) = settings.aws_session_token {
-                env.insert("AWS_SESSION_TOKEN".to_string(), t.clone());
-            }
-        }
-        Provider::Vertex => {
-            env.insert("CLAUDE_CODE_USE_VERTEX".to_string(), "1".to_string());
-            if let Some(ref p) = settings.gcp_project_id {
-                env.insert("CLOUD_ML_PROJECT_ID".to_string(), p.clone());
-            }
-            if let Some(ref r) = settings.gcp_region {
-                env.insert("CLOUD_ML_REGION".to_string(), r.clone());
-            }
-        }
+    #[test]
+    fn validate_keyring_key_allows_valid_keys() {
+        assert!(validate_keyring_key("aws_access_key_id").is_ok());
+        assert!(validate_keyring_key("aws_secret_access_key").is_ok());
+        assert!(validate_keyring_key("aws_session_token").is_ok());
     }
 
-    if let Some(ref m) = settings.model_override {
-        if !m.is_empty() {
-            env.insert("ANTHROPIC_MODEL".to_string(), m.clone());
-        }
+    #[test]
+    fn validate_keyring_key_rejects_invalid_keys() {
+        assert!(validate_keyring_key("arbitrary_key").is_err());
+        assert!(validate_keyring_key("").is_err());
+        assert!(validate_keyring_key("password").is_err());
+        assert!(validate_keyring_key("api_key").is_err());
+        assert!(validate_keyring_key("../etc/passwd").is_err());
     }
 
-    Ok(env)
+    #[test]
+    fn validate_keyring_key_error_message_includes_key() {
+        let err = validate_keyring_key("bad_key").unwrap_err();
+        assert!(err.contains("bad_key"));
+        assert!(err.contains("Invalid keyring key"));
+    }
+
+    #[test]
+    fn allowed_keys_list_has_exactly_three_entries() {
+        // Guard against accidental expansion of the allowlist
+        assert_eq!(ALLOWED_KEYRING_KEYS.len(), 3);
+    }
 }
+

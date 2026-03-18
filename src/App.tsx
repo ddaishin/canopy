@@ -44,6 +44,8 @@ function App() {
     clearTabNotice,
     markTabAttention,
     reorderTabs,
+    relaunchTab,
+    closeAllDeadTabs,
   } = useTerminal();
 
   const { toasts, addToast, removeToast } = useToast();
@@ -128,9 +130,8 @@ function App() {
         }
         const termId = hoveredTerminalIdRef.current || activeTerminalIdRef.current;
         if (termId && paths.length > 0) {
-          const pathStr = paths
-            .map((p) => (p.includes(" ") ? `"${p}"` : p))
-            .join(" ");
+          const shellEscape = (p: string) => "'" + p.replace(/'/g, "'\\''") + "'";
+        const pathStr = paths.map(shellEscape).join(" ");
           writeToTerminal(termId, pathStr).catch(console.error);
         }
       }
@@ -150,7 +151,7 @@ function App() {
         sendSessionNotification(tabLabel, exitCode).catch(console.error);
       }
     },
-    [markTabDead, addToast]
+    [markTabDead]
   );
 
   // Handle terminal bell (Claude asking a question / permission prompt)
@@ -242,6 +243,12 @@ function App() {
       if (e.key === "w" && !e.shiftKey) {
         e.preventDefault();
         if (activeTabId && activeTabId !== HOME_TAB_ID) {
+          const tab = tabs.find((t) => t.id === activeTabId);
+          if (tab && !tab.dead && tab.isClaudeSession && !tab.isProjectOverview) {
+            if (!window.confirm("This Claude session is still running. Close it?")) {
+              return;
+            }
+          }
           removeTab(activeTabId);
         }
         return;
@@ -442,6 +449,8 @@ function App() {
             onNewTerminal={handleNewTerminal}
             onNewClaudeSession={handleNewClaude}
             onReorderTabs={reorderTabs}
+            hasDeadTabs={tabs.some((t) => t.dead)}
+            onCloseAllDead={closeAllDeadTabs}
           />
 
           {/* Home tab content — kept mounted to preserve state (e.g. planner input) */}
@@ -524,6 +533,7 @@ function App() {
                       claudeCliAvailable={claudeCliAvailable ?? true}
                       onTabDied={(exitCode) => handleTabDied(tab.id, tab.label, tab.isClaudeSession, exitCode ?? null)}
                       onBell={() => handleBell(tab.id, tab.label, tab.isClaudeSession)}
+                      onRelaunch={() => relaunchTab(tab.id)}
                       isDragging={isDragging && isTabVisible}
                       onTerminalHover={handleTerminalHover}
                       onRegisterElement={registerTerminalElement}
@@ -539,6 +549,7 @@ function App() {
                     claudeCliAvailable={claudeCliAvailable ?? true}
                     onTabDied={(exitCode) => handleTabDied(tab.id, tab.label, tab.isClaudeSession, exitCode ?? null)}
                     onBell={() => handleBell(tab.id, tab.label, tab.isClaudeSession)}
+                    onRelaunch={() => relaunchTab(tab.id)}
                     isDragging={isDragging && isTabVisible}
                     onTerminalHover={handleTerminalHover}
                   />
