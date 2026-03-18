@@ -88,6 +88,7 @@ export function TerminalView({
   onRelaunchRef.current = onRelaunch;
 
   const emitStatus = useCallback((status: TabStatus, exitCode?: number | null) => {
+    if (currentStatusRef.current === status) return;
     currentStatusRef.current = status;
     onStatusChangeRef.current?.(status, exitCode);
   }, []);

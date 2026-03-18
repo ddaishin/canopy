@@ -31,7 +31,7 @@ function StatusIndicator({ status }: { status?: TabStatus }) {
     case "done-success":
       return <span className="tab-status-indicator status-done-success">{"\u2713"}</span>;
     case "done-error":
-      return <span className="tab-status-indicator status-done-error">x</span>;
+      return <span className="tab-status-indicator status-done-error">{"\u2717"}</span>;
     default:
       return null;
   }

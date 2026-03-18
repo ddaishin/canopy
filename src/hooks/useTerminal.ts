@@ -130,7 +130,7 @@ export function useTerminal() {
           isProjectOverview: true,
           projectPath,
           projectName,
-          status: "starting",
+          status: "idle",
         };
         setActiveTabId(id);
         return [...prev, newTab];

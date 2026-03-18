@@ -252,7 +252,7 @@ describe("useTerminal", () => {
     expect(tab.isProjectOverview).toBe(true);
     expect(tab.projectPath).toBe("/home/user/proj");
     expect(tab.label).toBe("proj");
-    expect(tab.status).toBe("starting");
+    expect(tab.status).toBe("idle"); // overview tabs never spawn PTY
   });
 
   it("openProjectTab reuses existing overview", () => {
