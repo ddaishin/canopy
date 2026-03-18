@@ -201,9 +201,27 @@ fn download_github_directory_inner(api_url: &str, target_dir: &Path, depth: u32)
         .map_err(|e| format!("Failed to parse GitHub API response: {}", e))?;
 
     for entry in entries {
+        // Validate entry name — prevent path traversal from malicious API responses
+        if entry.name.is_empty()
+            || entry.name.contains('/')
+            || entry.name.contains('\\')
+            || entry.name.contains("..")
+        {
+            continue;
+        }
+
+        // Validate entry path — prevent URL injection in recursive calls
+        if entry.path.contains("..") || entry.path.contains('?') || entry.path.contains('#') {
+            continue;
+        }
+
         match entry.entry_type.as_str() {
             "file" => {
                 if let Some(ref dl_url) = entry.download_url {
+                    // Validate download URL against allowlist — prevent SSRF
+                    if !dl_url.starts_with("https://raw.githubusercontent.com/") {
+                        continue;
+                    }
                     let dest = target_dir.join(&entry.name);
                     download_file(dl_url, &dest)?;
                 }
@@ -211,7 +229,6 @@ fn download_github_directory_inner(api_url: &str, target_dir: &Path, depth: u32)
             "dir" => {
                 let sub_api = format!(
                     "https://api.github.com/repos/{}/contents/{}",
-                    // Extract owner/repo from the API URL
                     extract_repo_from_api_url(api_url)
                         .ok_or_else(|| "Failed to parse repo from API URL".to_string())?,
                     entry.path,
