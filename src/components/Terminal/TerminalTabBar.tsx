@@ -13,6 +13,8 @@ interface TerminalTabBarProps {
   onNewTerminal: () => void;
   onNewClaudeSession: () => void;
   onReorderTabs?: (fromId: string, toId: string) => void;
+  hasDeadTabs?: boolean;
+  onCloseAllDead?: () => void;
 }
 
 export function TerminalTabBar({
@@ -25,6 +27,8 @@ export function TerminalTabBar({
   onNewTerminal,
   onNewClaudeSession,
   onReorderTabs,
+  hasDeadTabs,
+  onCloseAllDead,
 }: TerminalTabBarProps) {
   const terminalCount = tabs.filter((t) => !t.isProjectOverview).length;
 
@@ -109,6 +113,11 @@ export function TerminalTabBar({
                 <line x1="8" y1="1" x2="8" y2="15" />
               </svg>
             )}
+          </button>
+        )}
+        {hasDeadTabs && (
+          <button className="new-tab-btn dead-cleanup" onClick={onCloseAllDead} title="Close all dead tabs">
+            Clear dead
           </button>
         )}
         <button className="new-tab-btn" onClick={onNewClaudeSession} title="New Claude Session">
