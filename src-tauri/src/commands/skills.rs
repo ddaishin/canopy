@@ -153,7 +153,7 @@ struct GitHubContentEntry {
 /// Download a single file from a URL to a local path
 fn download_file(url: &str, dest: &Path) -> Result<(), String> {
     let output = Command::new("curl")
-        .args(["-s", "--fail", "--max-redirs", "0", "-L", url])
+        .args(["-s", "--fail", "--connect-timeout", "10", "--max-time", "30", url])
         .output()
         .map_err(|e| format!("Failed to run curl: {}", e))?;
 
@@ -165,8 +165,18 @@ fn download_file(url: &str, dest: &Path) -> Result<(), String> {
         .map_err(|e| format!("Failed to write {}: {}", dest.display(), e))
 }
 
-/// Recursively download a GitHub directory using the Contents API
+/// Recursively download a GitHub directory using the Contents API.
+/// `depth` limits recursion to prevent stack overflow from malicious repos.
+const MAX_DOWNLOAD_DEPTH: u32 = 5;
+
 fn download_github_directory(api_url: &str, target_dir: &Path) -> Result<(), String> {
+    download_github_directory_inner(api_url, target_dir, 0)
+}
+
+fn download_github_directory_inner(api_url: &str, target_dir: &Path, depth: u32) -> Result<(), String> {
+    if depth > MAX_DOWNLOAD_DEPTH {
+        return Err("Directory nesting too deep (max 5 levels)".to_string());
+    }
     fs::create_dir_all(target_dir)
         .map_err(|e| format!("Failed to create directory: {}", e))?;
 
@@ -174,6 +184,8 @@ fn download_github_directory(api_url: &str, target_dir: &Path) -> Result<(), Str
     let output = Command::new("curl")
         .args([
             "-s", "--fail",
+            "--connect-timeout", "10",
+            "--max-time", "30",
             "-H", "Accept: application/vnd.github.v3+json",
             "-H", "User-Agent: Canopy",
             api_url,
@@ -200,11 +212,12 @@ fn download_github_directory(api_url: &str, target_dir: &Path) -> Result<(), Str
                 let sub_api = format!(
                     "https://api.github.com/repos/{}/contents/{}",
                     // Extract owner/repo from the API URL
-                    extract_repo_from_api_url(api_url).unwrap_or_default(),
+                    extract_repo_from_api_url(api_url)
+                        .ok_or_else(|| "Failed to parse repo from API URL".to_string())?,
                     entry.path,
                 );
                 let sub_dir = target_dir.join(&entry.name);
-                download_github_directory(&sub_api, &sub_dir)?;
+                download_github_directory_inner(&sub_api, &sub_dir, depth + 1)?;
             }
             _ => {} // skip symlinks etc.
         }
@@ -294,21 +307,43 @@ pub fn install_skill(id: String, source_url: String, format: String) -> InstallR
         }
     } else {
         // Full directory download for skills
-        // Derive GitHub API URL from the raw.githubusercontent.com source URL
+        // Parse the raw.githubusercontent.com URL structurally:
         // source_url: https://raw.githubusercontent.com/anthropics/skills/main/skills/pdf/SKILL.md
-        // api_url:    https://api.github.com/repos/anthropics/skills/contents/skills/pdf
-        let api_url = source_url
-            .replace("https://raw.githubusercontent.com/", "https://api.github.com/repos/")
-            .replace("/main/", "/contents/")
-            .replace("/master/", "/contents/")
-            .trim_end_matches("/SKILL.md")
-            .to_string();
+        // → owner=anthropics, repo=skills, branch=main, path=skills/pdf/SKILL.md
+        // → api_url: https://api.github.com/repos/anthropics/skills/contents/skills/pdf
+        let api_url = match source_url.strip_prefix("https://raw.githubusercontent.com/") {
+            Some(rest) => {
+                let parts: Vec<&str> = rest.splitn(4, '/').collect();
+                if parts.len() < 4 {
+                    return InstallResult {
+                        success: false,
+                        id,
+                        installed_path: None,
+                        error: Some("Invalid source URL format".to_string()),
+                    };
+                }
+                let (owner, repo, _branch, file_path) = (parts[0], parts[1], parts[2], parts[3]);
+                let dir_path = file_path.trim_end_matches("/SKILL.md").trim_end_matches("SKILL.md");
+                let dir_path = dir_path.trim_end_matches('/');
+                format!("https://api.github.com/repos/{}/{}/contents/{}", owner, repo, dir_path)
+            }
+            None => {
+                return InstallResult {
+                    success: false,
+                    id,
+                    installed_path: None,
+                    error: Some("Source URL must be from raw.githubusercontent.com".to_string()),
+                };
+            }
+        };
 
         let target_dir = home.join(".claude").join("skills").join(&id);
 
         // Remove existing skill directory if present (clean reinstall)
         if target_dir.exists() {
-            let _ = fs::remove_dir_all(&target_dir);
+            fs::remove_dir_all(&target_dir)
+                .map_err(|e| format!("Failed to clean existing skill directory: {}", e))
+                .unwrap_or_else(|e| eprintln!("{}", e));
         }
 
         match download_github_directory(&api_url, &target_dir) {
@@ -441,8 +476,13 @@ pub fn fetch_marketplace_skills(repo: Option<String>) -> Result<Vec<MarketplaceS
     let repo = repo.unwrap_or_else(|| "anthropics/skills".to_string());
 
     // Validate repo format (owner/repo)
-    if !repo.contains('/') || repo.matches('/').count() != 1 {
-        return Err("Invalid repo format. Expected 'owner/repo'.".to_string());
+    let repo_parts: Vec<&str> = repo.splitn(2, '/').collect();
+    if repo_parts.len() != 2
+        || repo_parts[0].is_empty()
+        || repo_parts[1].is_empty()
+        || !repo_parts.iter().all(|p| p.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.'))
+    {
+        return Err("Invalid repo format. Expected 'owner/repo' with alphanumeric characters, hyphens, underscores, or periods.".to_string());
     }
 
     let api_url = format!(
@@ -453,6 +493,8 @@ pub fn fetch_marketplace_skills(repo: Option<String>) -> Result<Vec<MarketplaceS
     let output = Command::new("curl")
         .args([
             "-s", "--fail",
+            "--connect-timeout", "10",
+            "--max-time", "30",
             "-H", "Accept: application/vnd.github.v3+json",
             "-H", "User-Agent: Canopy",
             &api_url,

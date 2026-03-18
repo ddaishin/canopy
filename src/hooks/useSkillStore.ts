@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { SKILL_CATALOG } from "../data/skill-catalog";
 import type { CatalogSkill, InstalledSkillStatus, InstallResult } from "../types/skill-catalog";
@@ -19,12 +19,15 @@ export function useSkillStore() {
   const [marketplaceError, setMarketplaceError] = useState<string | null>(null);
 
   // Merged catalog: hardcoded + any live marketplace entries not already in hardcoded
-  const mergedCatalog = [...SKILL_CATALOG];
-  for (const ms of marketplaceSkills) {
-    if (!mergedCatalog.some((s) => s.id === ms.id)) {
-      mergedCatalog.push(ms);
+  const mergedCatalog = useMemo(() => {
+    const merged = [...SKILL_CATALOG];
+    for (const ms of marketplaceSkills) {
+      if (!merged.some((s) => s.id === ms.id)) {
+        merged.push(ms);
+      }
     }
-  }
+    return merged;
+  }, [marketplaceSkills]);
 
   const checkStatuses = useCallback(async () => {
     try {
@@ -38,8 +41,7 @@ export function useSkillStore() {
     } catch {
       // Silently fail — statuses will show as not installed
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mergedCatalog.length]);
+  }, [mergedCatalog]);
 
   useEffect(() => {
     checkStatuses();
