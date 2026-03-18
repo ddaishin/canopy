@@ -1,6 +1,6 @@
 {
   "name": "canopy",
-  "version": "0.1.9",
+  "version": "0.2.0",
   "description": "Desktop workspace manager and terminal multiplexer for Claude Code CLI sessions",
   "author": "Anthony Mazzola",
   "license": "MIT",
