@@ -101,6 +101,12 @@ pub fn spawn_terminal(
     system_prompt: Option<String>,
     on_event: Channel<TerminalEvent>,
 ) -> Result<String, String> {
+    // Validate project_path is a real directory
+    let project_dir = std::path::Path::new(&project_path);
+    if !project_dir.is_dir() {
+        return Err(format!("Invalid project path: {}", project_path));
+    }
+
     let terminal_id = uuid::Uuid::new_v4().to_string();
 
     let pty_system = NativePtySystem::default();
@@ -249,24 +255,22 @@ pub fn spawn_terminal(
                 Err(_) => break,
             }
         }
-        // Get real exit code from child process
-        let exit_code = if let Ok(mut terminals) = terminals_ref.lock() {
-            if let Some(mut term) = terminals.remove(&tid) {
-                term.child
-                    .wait()
-                    .ok()
-                    .map(|status| status.exit_code() as i32)
-            } else {
-                None
+        // Remove terminal from map first (short lock), then wait outside the lock
+        let mut removed_child = None;
+        if let Ok(mut terminals) = terminals_ref.lock() {
+            if let Some(term) = terminals.remove(&tid) {
+                removed_child = Some(term.child);
             }
-        } else {
-            None
-        };
+        }
+        let exit_code = removed_child
+            .and_then(|mut child| child.wait().ok())
+            .map(|status| status.exit_code() as i32);
         let _ = on_event.send(TerminalEvent::Exit { code: exit_code });
     });
 
     // Send initial command once the shell is ready (detected via PTY output)
-    if let Some(cmd) = initial_command {
+    // Only allow initial commands for Claude sessions to prevent shell injection
+    if let Some(cmd) = initial_command.filter(|_| is_claude_session) {
         let tid2 = terminal_id.clone();
         let terminals_ref2 = Arc::clone(&state.terminals);
         let is_claude = is_claude_session;

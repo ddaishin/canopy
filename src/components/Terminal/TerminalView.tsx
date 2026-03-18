@@ -11,6 +11,30 @@ import {
   resizeTerminal,
 } from "../../services/terminal-service";
 
+const XTERM_THEME = {
+  background: "#0D0D0D",
+  foreground: "#E0E0E0",
+  cursor: "#FF6B00",
+  cursorAccent: "#0D0D0D",
+  selectionBackground: "#FF6B0040",
+  black: "#1A1A1A",
+  red: "#FF5555",
+  green: "#50FA7B",
+  yellow: "#FFB86C",
+  blue: "#6272A4",
+  magenta: "#FF79C6",
+  cyan: "#8BE9FD",
+  white: "#E0E0E0",
+  brightBlack: "#555555",
+  brightRed: "#FF6E6E",
+  brightGreen: "#69FF94",
+  brightYellow: "#FFCFA8",
+  brightBlue: "#D6ACFF",
+  brightMagenta: "#FF92DF",
+  brightCyan: "#A4FFFF",
+  brightWhite: "#FFFFFF",
+};
+
 interface TerminalViewProps {
   tab: TerminalTab;
   isVisible: boolean;
@@ -19,6 +43,7 @@ interface TerminalViewProps {
   claudeCliAvailable?: boolean;
   onTabDied?: (exitCode: number | null) => void;
   onBell?: () => void;
+  onRelaunch?: () => void;
   isDragging?: boolean;
   onTerminalHover?: (terminalId: string | null) => void;
   onRegisterElement?: (terminalId: string, el: HTMLElement | null) => void;
@@ -32,6 +57,7 @@ export function TerminalView({
   claudeCliAvailable,
   onTabDied,
   onBell,
+  onRelaunch,
   isDragging,
   onTerminalHover,
   onRegisterElement,
@@ -45,6 +71,7 @@ export function TerminalView({
   const roRef = useRef<ResizeObserver | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [_fontSize, setFontSize] = useState(13);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Keep latest callbacks in refs to avoid stale closures
@@ -56,10 +83,43 @@ export function TerminalView({
   onBellRef.current = onBell;
   const onRegisterElementRef = useRef(onRegisterElement);
   onRegisterElementRef.current = onRegisterElement;
+  const onRelaunchRef = useRef(onRelaunch);
+  onRelaunchRef.current = onRelaunch;
 
   // Init terminal on first visibility — no cleanup (xterm persists)
   useEffect(() => {
     if (!containerRef.current || spawnedRef.current || !isVisible) return;
+
+    // If tab was restored from a previous session (dead on load), don't spawn a PTY
+    if (tab.dead) {
+      spawnedRef.current = true;
+      const container = containerRef.current;
+      const xterm = new Terminal({
+        cursorBlink: false,
+        fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
+        fontSize: 13,
+        lineHeight: 1.2,
+        theme: XTERM_THEME,
+        allowProposedApi: true,
+      });
+      const fitAddon = new FitAddon();
+      xterm.loadAddon(fitAddon);
+      xterm.open(container);
+      xtermRef.current = xterm;
+      fitAddonRef.current = fitAddon;
+      requestAnimationFrame(() => fitAddon.fit());
+      xterm.write("\x1b[90m[Previous session ended]\x1b[0m\r\n");
+      if (tab.isClaudeSession && tab.sessionId) {
+        xterm.write("\x1b[90mPress Enter to resume with --resume, or close this tab.\x1b[0m\r\n");
+      } else {
+        xterm.write("\x1b[90mPress Enter to relaunch, or close this tab.\x1b[0m\r\n");
+      }
+      xterm.onData(() => {
+        onRelaunchRef.current?.();
+      });
+      return;
+    }
+
     spawnedRef.current = true;
 
     const container = containerRef.current;
@@ -69,29 +129,7 @@ export function TerminalView({
       fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
       fontSize: 13,
       lineHeight: 1.2,
-      theme: {
-        background: "#0D0D0D",
-        foreground: "#E0E0E0",
-        cursor: "#FF6B00",
-        cursorAccent: "#0D0D0D",
-        selectionBackground: "#FF6B0040",
-        black: "#1A1A1A",
-        red: "#FF5555",
-        green: "#50FA7B",
-        yellow: "#FFB86C",
-        blue: "#6272A4",
-        magenta: "#FF79C6",
-        cyan: "#8BE9FD",
-        white: "#E0E0E0",
-        brightBlack: "#555555",
-        brightRed: "#FF6E6E",
-        brightGreen: "#69FF94",
-        brightYellow: "#FFCFA8",
-        brightBlue: "#D6ACFF",
-        brightMagenta: "#FF92DF",
-        brightCyan: "#A4FFFF",
-        brightWhite: "#FFFFFF",
-      },
+      theme: XTERM_THEME,
       allowProposedApi: true,
     });
 
@@ -209,6 +247,8 @@ export function TerminalView({
 
       const ro = new ResizeObserver(() => {
         if (container) {
+          const { width, height } = container.getBoundingClientRect();
+          if (width === 0 || height === 0) return; // Skip resize when hidden
           fitAddon.fit();
           resizeTerminal(termId, xterm.rows, xterm.cols).catch(console.error);
         }
@@ -250,6 +290,56 @@ export function TerminalView({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isVisible]);
 
+  // Cmd+Plus / Cmd+Minus / Cmd+0 — terminal font zoom
+  useEffect(() => {
+    if (!isVisible) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.key === "=" || e.key === "+") {
+        e.preventDefault();
+        setFontSize((prev) => {
+          const next = Math.min(prev + 1, 24);
+          if (xtermRef.current) {
+            xtermRef.current.options.fontSize = next;
+            fitAddonRef.current?.fit();
+            if (terminalIdRef.current) {
+              resizeTerminal(terminalIdRef.current, xtermRef.current.rows, xtermRef.current.cols).catch(console.error);
+            }
+          }
+          return next;
+        });
+      } else if (e.key === "-") {
+        e.preventDefault();
+        setFontSize((prev) => {
+          const next = Math.max(prev - 1, 8);
+          if (xtermRef.current) {
+            xtermRef.current.options.fontSize = next;
+            fitAddonRef.current?.fit();
+            if (terminalIdRef.current) {
+              resizeTerminal(terminalIdRef.current, xtermRef.current.rows, xtermRef.current.cols).catch(console.error);
+            }
+          }
+          return next;
+        });
+      } else if (e.key === "0") {
+        e.preventDefault();
+        setFontSize(() => {
+          const next = 13;
+          if (xtermRef.current) {
+            xtermRef.current.options.fontSize = next;
+            fitAddonRef.current?.fit();
+            if (terminalIdRef.current) {
+              resizeTerminal(terminalIdRef.current, xtermRef.current.rows, xtermRef.current.cols).catch(console.error);
+            }
+          }
+          return next;
+        });
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isVisible]);
+
   const handleSearchChange = useCallback((value: string) => {
     setSearchQuery(value);
     if (value) {
@@ -277,8 +367,18 @@ export function TerminalView({
   // Re-fit when becoming visible again or when split mode changes
   useEffect(() => {
     if (isVisible && fitAddonRef.current && xtermRef.current && terminalIdRef.current) {
-      // Use requestAnimationFrame to wait for layout, then fit once
-      const rafId = requestAnimationFrame(() => {
+      let cancelled = false;
+
+      const doFit = () => {
+        if (cancelled) return;
+        const container = containerRef.current;
+        if (!container) return;
+        const { width, height } = container.getBoundingClientRect();
+        if (width === 0 || height === 0) {
+          // Layout hasn't settled yet (e.g. switching to split mode) — retry shortly
+          setTimeout(doFit, 50);
+          return;
+        }
         fitAddonRef.current?.fit();
         if (terminalIdRef.current && xtermRef.current) {
           resizeTerminal(
@@ -287,10 +387,22 @@ export function TerminalView({
             xtermRef.current.cols
           ).catch(console.error);
         }
-      });
-      return () => cancelAnimationFrame(rafId);
+      };
+
+      requestAnimationFrame(doFit);
+      return () => { cancelled = true; };
     }
   }, [isVisible, splitMode]);
+
+  // Auto-focus terminal when tab becomes visible
+  useEffect(() => {
+    if (isVisible && xtermRef.current) {
+      // Small delay to ensure layout is complete
+      requestAnimationFrame(() => {
+        xtermRef.current?.focus();
+      });
+    }
+  }, [isVisible]);
 
   return (
     <div

@@ -14,6 +14,7 @@ interface SavedSession {
   projectPath: string;
   projectName?: string;
   isWorkspaceAgent?: boolean;
+  sessionId?: string;
 }
 
 function loadSavedSessions(): { tabs: TerminalTab[]; activeTabId: string } {
@@ -30,6 +31,8 @@ function loadSavedSessions(): { tabs: TerminalTab[]; activeTabId: string } {
       projectPath: s.projectPath,
       projectName: s.projectName,
       isWorkspaceAgent: s.isWorkspaceAgent,
+      sessionId: s.sessionId,
+      dead: !s.isProjectOverview, // PTY is gone after restart
     }));
     return { tabs, activeTabId: saved.activeTabId || HOME_TAB_ID };
   } catch {
@@ -46,6 +49,7 @@ function saveSessions(tabs: TerminalTab[], activeTabId: string | null) {
     projectPath: t.projectPath,
     projectName: t.projectName,
     isWorkspaceAgent: t.isWorkspaceAgent,
+    sessionId: t.sessionId,
   }));
   localStorage.setItem(
     SESSION_STORAGE_KEY,
@@ -54,10 +58,11 @@ function saveSessions(tabs: TerminalTab[], activeTabId: string | null) {
 }
 
 export function useTerminal() {
-  const [tabs, setTabs] = useState<TerminalTab[]>(() => loadSavedSessions().tabs);
+  const [savedState] = useState(() => loadSavedSessions());
+  const [tabs, setTabs] = useState<TerminalTab[]>(savedState.tabs);
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
-  const [activeTabId, setActiveTabId] = useState<string | null>(() => loadSavedSessions().activeTabId);
+  const [activeTabId, setActiveTabId] = useState<string | null>(savedState.activeTabId);
   const [splitMode, setSplitMode] = useState(false);
 
   // Persist tab state on change
@@ -238,6 +243,38 @@ export function useTerminal() {
     });
   }, []);
 
+  const relaunchTab = useCallback(
+    (tabId: string) => {
+      const tab = tabsRef.current.find((t) => t.id === tabId);
+      if (!tab) return;
+      // Create new tab with same project, resuming session if Claude
+      const newId = addTab(
+        tab.projectPath,
+        tab.isClaudeSession,
+        tab.isClaudeSession ? tab.sessionId : undefined
+      );
+      // Remove the dead tab
+      setTabs((prev) => prev.filter((t) => t.id !== tabId));
+      return newId;
+    },
+    [addTab]
+  );
+
+  const closeAllDeadTabs = useCallback(async () => {
+    const deadTabs = tabsRef.current.filter((t) => t.dead);
+    for (const tab of deadTabs) {
+      if (tab.terminalId) {
+        closeTerminal(tab.terminalId).catch(() => {});
+      }
+    }
+    setTabs((prev) => prev.filter((t) => !t.dead));
+    setActiveTabId((current) => {
+      const remaining = tabsRef.current.filter((t) => !t.dead);
+      if (current && remaining.some((t) => t.id === current)) return current;
+      return HOME_TAB_ID;
+    });
+  }, []);
+
   return {
     tabs,
     activeTabId,
@@ -254,5 +291,7 @@ export function useTerminal() {
     clearTabNotice,
     markTabAttention,
     reorderTabs,
+    relaunchTab,
+    closeAllDeadTabs,
   };
 }
