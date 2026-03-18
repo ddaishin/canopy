@@ -944,6 +944,66 @@ html, body, #root {
   color: var(--text-primary);
 }
 
+.new-tab-group {
+  position: relative;
+  display: flex;
+  gap: 0;
+}
+
+.new-tab-btn.dropdown-toggle {
+  padding: 4px 4px;
+  font-size: 9px;
+  color: var(--text-muted);
+  margin-left: -4px;
+}
+
+.new-tab-btn.dropdown-toggle:hover {
+  color: var(--accent-orange);
+}
+
+.quick-actions-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 4px;
+  z-index: 100;
+  min-width: 160px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.quick-action-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: 4px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.quick-action-item:hover {
+  background: var(--bg-hover);
+  color: var(--accent-orange);
+}
+
+.quick-action-icon {
+  color: var(--text-muted);
+  font-size: 10px;
+  width: 12px;
+  text-align: center;
+}
+
 .split-view-btn {
   background: none;
   border: 1px solid var(--border-color);
@@ -1410,6 +1470,47 @@ html, body, #root {
 
 .skills-search::placeholder {
   color: var(--text-muted);
+}
+
+.skills-repo-search {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.skills-repo-search .skills-search {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.skills-fetch-btn {
+  background: var(--bg-hover);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.skills-fetch-btn:hover {
+  background: var(--accent-orange-glow);
+  color: var(--accent-orange);
+  border-color: var(--accent-orange);
+}
+
+.skills-fetch-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.skills-error {
+  color: var(--danger);
+  font-size: 11px;
+  padding: 4px 8px;
+  margin-bottom: 8px;
 }
 
 .skills-group {

@@ -1,7 +1,16 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { TerminalTab as TerminalTabType } from "../../types/terminal";
 import { TerminalTab } from "./TerminalTab";
 import { HOME_TAB_ID } from "../../hooks/useTerminal";
+
+const QUICK_ACTIONS = [
+  { label: "Review PR", prompt: "Review the current branch's changes against main. Focus on bugs, edge cases, and code quality. Provide structured findings.", icon: ">" },
+  { label: "Fix Tests", prompt: "Find and fix any failing tests. Run the test suite first, then diagnose and fix each failure.", icon: ">" },
+  { label: "Commit", prompt: "/commit", icon: "/" },
+  { label: "Plan Feature", prompt: "/plan", icon: "/" },
+  { label: "Audit Code", prompt: "Perform a code review of recent changes. Check for bugs, security issues, and improvements.", icon: ">" },
+  { label: "Simplify", prompt: "/simplify", icon: "/" },
+];
 
 interface TerminalTabBarProps {
   tabs: TerminalTabType[];
@@ -12,6 +21,7 @@ interface TerminalTabBarProps {
   onToggleSplit: () => void;
   onNewTerminal: () => void;
   onNewClaudeSession: () => void;
+  onNewClaudeWithPrompt?: (prompt: string) => void;
   onReorderTabs?: (fromId: string, toId: string) => void;
   hasDeadTabs?: boolean;
   onCloseAllDead?: () => void;
@@ -26,11 +36,26 @@ export function TerminalTabBar({
   onToggleSplit,
   onNewTerminal,
   onNewClaudeSession,
+  onNewClaudeWithPrompt,
   onReorderTabs,
   hasDeadTabs,
   onCloseAllDead,
 }: TerminalTabBarProps) {
   const terminalCount = tabs.filter((t) => !t.isProjectOverview).length;
+  const [showActions, setShowActions] = useState(false);
+  const actionsRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!showActions) return;
+    const handleClick = (e: MouseEvent) => {
+      if (actionsRef.current && !actionsRef.current.contains(e.target as Node)) {
+        setShowActions(false);
+      }
+    };
+    window.addEventListener("mousedown", handleClick);
+    return () => window.removeEventListener("mousedown", handleClick);
+  }, [showActions]);
 
   // Pointer-based tab reorder (avoids conflict with Tauri's native drag-drop)
   const [draggingTabId, setDraggingTabId] = useState<string | null>(null);
@@ -118,9 +143,37 @@ export function TerminalTabBar({
             Clear dead
           </button>
         )}
-        <button className="new-tab-btn" onClick={onNewClaudeSession} title="New Claude Session">
-          + Claude
-        </button>
+        <div className="new-tab-group" ref={actionsRef}>
+          <button className="new-tab-btn" onClick={onNewClaudeSession} title="New Claude Session">
+            + Claude
+          </button>
+          {onNewClaudeWithPrompt && (
+            <button
+              className="new-tab-btn dropdown-toggle"
+              onClick={() => setShowActions(!showActions)}
+              title="Quick actions"
+            >
+              {"\u25BE"}
+            </button>
+          )}
+          {showActions && onNewClaudeWithPrompt && (
+            <div className="quick-actions-dropdown">
+              {QUICK_ACTIONS.map((action) => (
+                <button
+                  key={action.label}
+                  className="quick-action-item"
+                  onClick={() => {
+                    onNewClaudeWithPrompt(action.prompt);
+                    setShowActions(false);
+                  }}
+                >
+                  <span className="quick-action-icon">{action.icon}</span>
+                  <span>{action.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <button className="new-tab-btn shell" onClick={onNewTerminal} title="New Terminal">
           + Shell
         </button>

@@ -445,6 +445,7 @@ function App() {
             onToggleSplit={toggleSplit}
             onNewTerminal={handleNewTerminal}
             onNewClaudeSession={handleNewClaude}
+            onNewClaudeWithPrompt={handleSendTaskToClaude}
             onReorderTabs={reorderTabs}
             hasDeadTabs={tabs.some((t) => isDoneStatus(t.status))}
             onCloseAllDead={closeAllDeadTabs}

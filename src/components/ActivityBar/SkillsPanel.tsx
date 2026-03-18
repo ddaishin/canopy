@@ -26,7 +26,8 @@ export function SkillsPanel({ projectPath, onRunSkill, startOnBrowse, onBrowseMo
   const [browseFilter, setBrowseFilter] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
 
-  const { catalog, statuses, installing, install, uninstall } = useSkillStore();
+  const { catalog, statuses, installing, install, uninstall, fetchMarketplace, marketplaceLoading, marketplaceError } = useSkillStore();
+  const [repoInput, setRepoInput] = useState("");
 
   // Sync with external browse mode signal
   useEffect(() => {
@@ -163,10 +164,35 @@ export function SkillsPanel({ projectPath, onRunSkill, startOnBrowse, onBrowseMo
             <span className="skills-browse-count">{installedCount} installed</span>
           </div>
 
+          <div className="skills-repo-search">
+            <input
+              className="skills-search"
+              type="text"
+              placeholder="GitHub repo (e.g. owner/skills-repo)"
+              value={repoInput}
+              onChange={(e) => setRepoInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && repoInput.trim()) {
+                  fetchMarketplace(repoInput.trim());
+                }
+              }}
+            />
+            <button
+              className="skills-fetch-btn"
+              onClick={() => fetchMarketplace(repoInput.trim() || undefined)}
+              disabled={marketplaceLoading}
+            >
+              {marketplaceLoading ? "..." : repoInput.trim() ? "Search" : "Refresh"}
+            </button>
+          </div>
+          {marketplaceError && (
+            <div className="skills-error">{marketplaceError}</div>
+          )}
+
           <input
             className="skills-search"
             type="text"
-            placeholder="Search skills..."
+            placeholder="Filter skills..."
             value={browseFilter}
             onChange={(e) => setBrowseFilter(e.target.value)}
           />
