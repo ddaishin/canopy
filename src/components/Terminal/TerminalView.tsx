@@ -3,6 +3,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { SearchAddon } from "@xterm/addon-search";
+import { open } from "@tauri-apps/plugin-shell";
 import type { TerminalTab } from "../../types/terminal";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -136,7 +137,9 @@ export function TerminalView({
     const fitAddon = new FitAddon();
     const searchAddon = new SearchAddon();
     xterm.loadAddon(fitAddon);
-    xterm.loadAddon(new WebLinksAddon());
+    xterm.loadAddon(new WebLinksAddon((_event, uri) => {
+      open(uri).catch(console.error);
+    }));
     xterm.loadAddon(searchAddon);
     searchAddonRef.current = searchAddon;
 
