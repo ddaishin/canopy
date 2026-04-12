@@ -93,7 +93,17 @@ Strict mode enabled. Target ES2021. Module resolution set to `bundler`. JSX uses
 ## Git運用
 
 - Conventional Commits（日本語）: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`
-- コミットメッセージは日本語で記述
+- コミットメッセージは日本語で記述（upstream への PR は英語）
+
+### ブランチ運用
+
+| ブランチ | 用途 | 注意 |
+|---|---|---|
+| `main` | upstream と同期専用 | 自分の変更をコミットしない |
+| `develop` | fork 固有の作業ブランチ | 設定・ドキュメント等はここ |
+| `fix/xxx`, `feat/xxx` | upstream への PR 用 | マージ後に削除 |
+
+- upstream の更新取り込み: `git pull upstream main` → `git checkout develop` → `git rebase main`
 
 ## 設計上の決定事項
 
