@@ -1,3 +1,4 @@
+use super::CommandNoWindow;
 use crate::state::AppState;
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use serde::Serialize;
@@ -66,6 +67,7 @@ pub fn check_claude_cli() -> ClaudeCliStatus {
         ("which", "claude")
     };
     match std::process::Command::new(cmd)
+        .no_window()
         .arg(arg)
         .env("PATH", &full_path)
         .output()
