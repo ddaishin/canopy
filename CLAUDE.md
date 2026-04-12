@@ -1,5 +1,10 @@
 # CLAUDE.md
 
+> Universal principles are loaded from `~/.claude/rules/` (global).
+> This file contains project-specific configuration only.
+
+---
+
 ## Project Overview
 
 Canopy is a Tauri v2 desktop app that manages Claude Code CLI sessions. It acts as a workspace manager and terminal multiplexer: you add project folders, then launch Claude Code sessions or shell terminals against them. Everything runs locally -- no external APIs.
@@ -84,3 +89,17 @@ The Vite dev server runs on port 1420. HMR ignores `src-tauri/`.
 ## TypeScript Config
 
 Strict mode enabled. Target ES2021. Module resolution set to `bundler`. JSX uses `react-jsx` transform.
+
+## Git運用
+
+- Conventional Commits（日本語）: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`
+- コミットメッセージは日本語で記述
+
+## 設計上の決定事項
+
+<!-- コードからは読み取れない判断の背景・制約を記載 -->
+
+## 現在の状態
+
+- v0.2.0 リリース済み
+- MSI パッケージビルド対応済み
