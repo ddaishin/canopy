@@ -1067,6 +1067,34 @@ html, body, #root {
   overflow-y: auto !important;
 }
 
+/* IME fix: prevent candidate window drift during composition.
+   Chromium positions IME window based on internal caret bounds.
+   letter-spacing collapses all characters to zero width so the
+   caret never advances, keeping the IME window anchored.
+   padding-top pushes the caret down so the IME window appears
+   below the terminal text instead of overlapping it. */
+.terminal-container .xterm-helper-textarea {
+  left: 0px !important;
+  width: 1px !important;
+  font-size: 1px !important;
+  letter-spacing: -1em !important;
+  padding-top: var(--xterm-cell-height, 18px) !important;
+  overflow: hidden !important;
+}
+/* During composition, lock top position via CSS variable set by JS */
+.terminal-container .xterm-helper-textarea.ime-locked {
+  top: var(--ime-locked-top) !important;
+}
+
+/* Hide the composition preview text visually but keep element in DOM
+   so xterm.js IME processing pipeline continues to work */
+.terminal-container .composition-view {
+  opacity: 0 !important;
+  width: 1px !important;
+  height: 1px !important;
+  overflow: hidden !important;
+}
+
 /* ── Terminal Search Bar ── */
 .terminal-search-bar {
   position: absolute;
