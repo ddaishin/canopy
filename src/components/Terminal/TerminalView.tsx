@@ -153,8 +153,35 @@ export function TerminalView({
     xtermRef.current = xterm;
     fitAddonRef.current = fitAddon;
 
+    // IME: set CSS custom property for cell height (used by padding-top)
+    const syncCellHeight = () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const dims = (xterm as any)._core?._renderService?.dimensions;
+      if (dims?.css?.cell?.height) {
+        container.style.setProperty("--xterm-cell-height", dims.css.cell.height + "px");
+      }
+    };
+    xterm.onRender(syncCellHeight);
+
+    // IME: lock textarea top position during composition so status bar
+    // updates don't cause the IME candidate window to jump vertically
+    const imeTextarea = container.querySelector(".xterm-helper-textarea") as HTMLTextAreaElement | null;
+    if (imeTextarea) {
+      imeTextarea.addEventListener("compositionstart", () => {
+        const currentTop = imeTextarea.style.top;
+        imeTextarea.style.setProperty("--ime-locked-top", currentTop);
+        imeTextarea.classList.add("ime-locked");
+      });
+      imeTextarea.addEventListener("compositionend", () => {
+        imeTextarea.classList.remove("ime-locked");
+      });
+    }
+
     // Fit after a frame so container has real dimensions
-    requestAnimationFrame(() => fitAddon.fit());
+    requestAnimationFrame(() => {
+      fitAddon.fit();
+      syncCellHeight();
+    });
 
     // Guard: if Claude CLI is not available, show help instead of spawning
     if (tab.isClaudeSession && claudeCliAvailable === false) {
