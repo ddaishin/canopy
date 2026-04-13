@@ -1,3 +1,4 @@
+use super::CommandNoWindow;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -153,6 +154,7 @@ struct GitHubContentEntry {
 /// Download a single file from a URL to a local path
 fn download_file(url: &str, dest: &Path) -> Result<(), String> {
     let output = Command::new("curl")
+        .no_window()
         .args(["-s", "--fail", "--connect-timeout", "10", "--max-time", "30", url])
         .output()
         .map_err(|e| format!("Failed to run curl: {}", e))?;
@@ -182,6 +184,7 @@ fn download_github_directory_inner(api_url: &str, target_dir: &Path, depth: u32)
 
     // Fetch directory listing from GitHub Contents API
     let output = Command::new("curl")
+        .no_window()
         .args([
             "-s", "--fail",
             "--connect-timeout", "10",
@@ -508,6 +511,7 @@ pub fn fetch_marketplace_skills(repo: Option<String>) -> Result<Vec<MarketplaceS
     );
 
     let output = Command::new("curl")
+        .no_window()
         .args([
             "-s", "--fail",
             "--connect-timeout", "10",
@@ -542,6 +546,7 @@ pub fn fetch_marketplace_skills(repo: Option<String>) -> Result<Vec<MarketplaceS
         );
 
         let md_output = Command::new("curl")
+            .no_window()
             .args(["-s", "--fail", &skill_url])
             .output();
 

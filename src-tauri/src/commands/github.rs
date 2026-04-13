@@ -1,4 +1,5 @@
 use super::terminal::ensure_full_path;
+use super::CommandNoWindow;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
@@ -114,7 +115,7 @@ fn find_github_repo(project_path: &str) -> Option<String> {
 pub async fn get_github_items(project_paths: Vec<String>) -> GitHubData {
     // Check if gh CLI is available
     let full_path = ensure_full_path();
-    let gh_check = Command::new("gh").arg("--version").env("PATH", &full_path).output();
+    let gh_check = Command::new("gh").no_window().arg("--version").env("PATH", &full_path).output();
     if !matches!(gh_check, Ok(ref o) if o.status.success()) {
         return GitHubData {
             prs: vec![],
@@ -149,6 +150,7 @@ pub async fn get_github_items(project_paths: Vec<String>) -> GitHubData {
 
             // Fetch PRs authored by the current user
             if let Ok(output) = Command::new("gh")
+                .no_window()
                 .args([
                     "pr", "list",
                     "--author", "@me",
@@ -181,6 +183,7 @@ pub async fn get_github_items(project_paths: Vec<String>) -> GitHubData {
 
             // Also fetch PRs where I'm requested as reviewer
             if let Ok(output) = Command::new("gh")
+                .no_window()
                 .args([
                     "search", "prs",
                     "--review-requested", "@me",
@@ -217,6 +220,7 @@ pub async fn get_github_items(project_paths: Vec<String>) -> GitHubData {
 
             // Fetch PRs assigned to the current user
             if let Ok(output) = Command::new("gh")
+                .no_window()
                 .args([
                     "pr", "list",
                     "--assignee", "@me",
@@ -252,6 +256,7 @@ pub async fn get_github_items(project_paths: Vec<String>) -> GitHubData {
 
             // Fetch assigned issues
             if let Ok(output) = Command::new("gh")
+                .no_window()
                 .args([
                     "issue", "list",
                     "--assignee", "@me",
