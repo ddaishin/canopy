@@ -73,6 +73,10 @@ function App() {
   // Registry of terminal container DOM elements for hit-testing during OS drag
   const terminalElementsRef = useRef<Map<string, HTMLElement>>(new Map());
 
+  // Read-only tabs ref for event handlers that shouldn't re-create on every tab change
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
+
   useEffect(() => {
     const activeTab = tabs.find((t) => t.id === activeTabId);
     activeTerminalIdRef.current = activeTab?.terminalId ?? null;
@@ -163,7 +167,7 @@ function App() {
         getCurrentWindow().requestUserAttention(UserAttentionType.Informational).catch(console.error);
 
         // Update dock badge with count of tabs needing attention
-        const attentionCount = tabs.filter((t) => t.status === "waiting").length + 1;
+        const attentionCount = tabsRef.current.filter((t) => t.status === "waiting").length + 1;
         getCurrentWindow().setBadgeCount(attentionCount).catch(console.error);
 
         if (notifSettingsRef.current.toastNotifications) {
@@ -179,7 +183,7 @@ function App() {
         }
       }
     },
-    [setTabStatus, addToast, tabs]
+    [setTabStatus, addToast]
   );
 
   const selectTab = useCallback(
