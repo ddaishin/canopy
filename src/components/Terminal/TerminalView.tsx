@@ -157,13 +157,17 @@ export function TerminalView({
     xtermRef.current = xterm;
     fitAddonRef.current = fitAddon;
 
-    // IME: set CSS custom property for cell height (used by padding-top)
+    // IME: set CSS custom property for cell height (used by padding-top).
+    // onRender fires every frame during output, so skip when value is unchanged
+    // to avoid unnecessary DOM writes.
+    let lastCellHeight = 0;
     const syncCellHeight = () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const dims = (xterm as any)._core?._renderService?.dimensions;
-      if (dims?.css?.cell?.height) {
-        container.style.setProperty("--xterm-cell-height", dims.css.cell.height + "px");
-      }
+      const h = dims?.css?.cell?.height;
+      if (!h || h === lastCellHeight) return;
+      lastCellHeight = h;
+      container.style.setProperty("--xterm-cell-height", h + "px");
     };
     xterm.onRender(syncCellHeight);
 
@@ -180,7 +184,6 @@ export function TerminalView({
         imeTextarea.classList.remove("ime-locked");
       });
     }
-
 
     // Copy/paste keyboard shortcuts (Ctrl+Shift+C / Ctrl+Shift+V)
     // These don't conflict with SIGINT (Ctrl+C) and match xterm convention.
