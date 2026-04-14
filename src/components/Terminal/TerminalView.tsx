@@ -14,6 +14,10 @@ import {
   resizeTerminal,
 } from "../../services/terminal-service";
 
+// Shared decoder/regex — reused across output events to reduce GC pressure
+const TEXT_DECODER = new TextDecoder();
+const ANSI_ESCAPE_RE = /\x1b\[[0-9;]*[a-zA-Z]/g;
+
 const XTERM_THEME = {
   background: "#0D0D0D",
   foreground: "#E0E0E0",
@@ -239,8 +243,11 @@ export function TerminalView({
             }, IDLE_THRESHOLD_MS);
 
             // Strip ANSI escape sequences and check for attention patterns
-            const text = new TextDecoder().decode(bytes).replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
-            checkForAttentionNeeded(text);
+            // Guard with isClaudeSession — shell tabs don't need this work
+            if (tab.isClaudeSession) {
+              const text = TEXT_DECODER.decode(bytes).replace(ANSI_ESCAPE_RE, "");
+              checkForAttentionNeeded(text);
+            }
           } else if (event.type === "exit") {
             // Clear idle timer
             if (idleTimerRef.current) clearTimeout(idleTimerRef.current);

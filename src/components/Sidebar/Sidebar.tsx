@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { ask } from "@tauri-apps/plugin-dialog";
 import type { Project } from "../../types/project";
 import type { Workspace } from "../../services/database-service";
@@ -26,27 +27,31 @@ export function Sidebar({
   onRemoveWorkspace,
   onGoHome,
 }: SidebarProps) {
-  // Group projects by workspace
-  const workspaceProjects = new Map<string, Project[]>();
-  const standaloneProjects: Project[] = [];
+  // Group projects by workspace, memoized by projects reference
+  const { workspaceProjects, standaloneProjects } = useMemo(() => {
+    const wp = new Map<string, Project[]>();
+    const sa: Project[] = [];
 
-  for (const p of projects) {
-    if (p.workspace_path) {
-      const existing = workspaceProjects.get(p.workspace_path) || [];
-      existing.push(p);
-      workspaceProjects.set(p.workspace_path, existing);
-    } else {
-      standaloneProjects.push(p);
+    for (const p of projects) {
+      if (p.workspace_path) {
+        const existing = wp.get(p.workspace_path) || [];
+        existing.push(p);
+        wp.set(p.workspace_path, existing);
+      } else {
+        sa.push(p);
+      }
     }
-  }
 
-  // Sort workspace projects alphabetically
-  for (const [key, val] of workspaceProjects) {
-    workspaceProjects.set(
-      key,
-      val.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))
-    );
-  }
+    // Sort workspace projects alphabetically
+    for (const [key, val] of wp) {
+      wp.set(
+        key,
+        val.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))
+      );
+    }
+
+    return { workspaceProjects: wp, standaloneProjects: sa };
+  }, [projects]);
 
   return (
     <div className="sidebar">
