@@ -153,6 +153,31 @@ export function TerminalView({
     xtermRef.current = xterm;
     fitAddonRef.current = fitAddon;
 
+    // Copy/paste keyboard shortcuts (Ctrl+Shift+C / Ctrl+Shift+V)
+    // These don't conflict with SIGINT (Ctrl+C) and match xterm convention.
+    xterm.attachCustomKeyEventHandler((e) => {
+      if (e.type !== "keydown") return true;
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.shiftKey && (e.key === "C" || e.key === "c")) {
+        const selection = xterm.getSelection();
+        if (selection) {
+          navigator.clipboard.writeText(selection).catch(console.error);
+        }
+        e.preventDefault();
+        return false;
+      }
+      if (mod && e.shiftKey && (e.key === "V" || e.key === "v")) {
+        navigator.clipboard.readText().then((text) => {
+          if (terminalIdRef.current && text) {
+            writeToTerminal(terminalIdRef.current, text).catch(console.error);
+          }
+        }).catch(console.error);
+        e.preventDefault();
+        return false;
+      }
+      return true;
+    });
+
     // Fit after a frame so container has real dimensions
     requestAnimationFrame(() => fitAddon.fit());
 
